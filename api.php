@@ -23,7 +23,7 @@ function out(array $x, int $code = 200): void {
 function fail(string $msg, int $code = 400): void { out(['error' => ['message' => $msg]], $code); }
 
 // --- keamanan: login + CSRF ---
-if (($C['app_password'] ?? '') !== '' && empty($_SESSION['ac_ok'])) fail('Belum login', 401);
+if ((($C['app_password'] ?? '') !== '' || !empty($C['login_users'])) && empty($_SESSION['ac_ok'])) fail('Belum login', 401);
 if (!hash_equals((string)($_SESSION['csrf'] ?? ''), (string)($_SERVER['HTTP_X_CSRF'] ?? ''))) fail('Sesi tidak valid', 401);
 session_write_close();   // lepas kunci session supaya request paralel tidak antre
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail('Method tidak diizinkan', 405);

@@ -459,3 +459,83 @@ button:active:not(:disabled),a.btn:active{transform:scale(.96)}
 .aimode{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-right:4px}
 .aimode button{border:0;background:#fff;font-size:12px;font-weight:600;padding:6px 9px;cursor:pointer;color:var(--muted)}
 .aimode button.on{background:var(--brand-grad);color:#fff}
+
+/* ===== v1.2: logo Montera, brand, download per akun ===== */
+.rail-logo img{width:34px;height:auto;display:block}
+.brand-title{display:flex;align-items:center;margin:0}
+.brand-title img{height:46px;width:auto;display:block}
+.plogo{background:#f1edff;padding:3px}
+.plogo img{width:100%;height:100%;object-fit:contain;display:block}
+.acc-h .plogo{padding:4px}
+img.mlogo{width:1.3em;height:1.1em;object-fit:contain;vertical-align:-.22em;flex:none}
+.chat-fab img.mlogo,.btn.claude img.mlogo,.aimode img.mlogo{filter:brightness(0) invert(1)}
+.chat-fab img.mlogo{width:22px;height:20px}
+.rail-btn img.mlogo{width:24px;height:22px}
+.view img.mlogo{width:17px;height:15px}
+.clv img.mlogo{width:14px;height:12px}
+.pill.brand{font-weight:700}
+.pill-sep{width:1px;height:24px;background:var(--line);margin:0 4px;align-self:center}
+.acc-f{position:relative;padding-right:64px}
+.acc-dl{position:absolute;right:0;bottom:-2px;display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:700;color:#1e8e3e;background:#e6f4ea;border:1px solid #b7dfc2;border-radius:6px;padding:3px 7px;cursor:pointer;transition:transform .09s,filter .15s}
+.acc-dl svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2.2}
+.acc-dl:hover{filter:brightness(.96)}
+.acc-dl:active{transform:scale(.94)}
+.acc-dl.busy,#btnExport.busy{opacity:.6;pointer-events:none}
+
+/* ===== v1.2.1: ukuran logo dikunci ===== */
+.plogo{overflow:hidden}
+.plogo img,img.mlogo,.rail-logo img{max-width:100%;max-height:100%}
+.rail-logo img{width:34px;height:29px;object-fit:contain}
+
+/* ===== v1.2.2: logo MONTERA ADS di judul ===== */
+.head h1.brand-title{display:flex;align-items:center;margin:0 6px 0 0;line-height:0}
+.head h1.brand-title img{width:83px;height:50px;max-width:none;max-height:none;object-fit:contain;display:block}
+
+/* ===== v1.2.3: header logo rapi di tengah ===== */
+.head{min-height:72px;height:auto;padding:8px 0;align-items:center}
+.head h1.brand-title{height:56px;padding:0 10px 0 2px;margin:0 6px 0 0;border-right:1px solid var(--line);display:flex;align-items:center;justify-content:center}
+.head h1.brand-title img{width:76px;height:46px}
+
+/* ===== v1.3: login dengan animasi beruang (Rive) ===== */
+.login-body{background:radial-gradient(1200px 600px at 20% 0%,#efe9ff,transparent),radial-gradient(900px 500px at 100% 100%,#e6f7f2,transparent),#f4f2fb}
+.rive-login{width:min(400px,94vw);padding:22px 24px 26px;gap:12px;border-radius:18px;box-shadow:0 18px 50px rgba(75,44,201,.16);text-align:left}
+.login-logo{display:block;margin:0 auto;width:116px;height:70px;object-fit:contain}
+.teddy-wrap{width:100%;aspect-ratio:340/250;border-radius:14px;overflow:hidden;background:linear-gradient(180deg,#d6e6ff,#c7dcff)}
+.teddy-wrap canvas{width:100%;height:100%;display:block}
+.fld-l{display:grid;gap:5px;font-size:13px;font-weight:600;color:var(--text)}
+.fld-l input{height:44px;border:1px solid var(--line);border-radius:10px;padding:0 12px;font:inherit;font-weight:400;width:100%}
+.fld-l input:focus{outline:none;border-color:#6a4dff;box-shadow:0 0 0 3px rgba(106,77,255,.18)}
+.pw-row{position:relative;display:block}
+.pw-row input{padding-right:44px}
+.eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:none;font-size:17px;cursor:pointer;width:34px;height:34px;border-radius:8px}
+.eye:hover{background:#f1edff}
+#loginForm{display:grid;gap:12px}
+.login-btn{height:46px;justify-content:center;font-size:15px;background:linear-gradient(135deg,#7b4dff,#4b2cc9)!important;border:0!important}
+.login-btn:disabled{opacity:.75}
+.shake{animation:shake .45s ease}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
+
+/* ===== v1.3.1: login — latar warna Prepare × Skinlyfe, popup berhasil, pesan salah ===== */
+.login-body{position:relative;overflow:hidden;background:linear-gradient(125deg,#fde7f0 0%,#f3e9ff 45%,#e3f7f1 100%)}
+.login-body::before,.login-body::after{content:"";position:fixed;width:58vmax;height:58vmax;border-radius:50%;filter:blur(70px);opacity:.55;z-index:0;animation:blobMove 16s ease-in-out infinite alternate}
+.login-body::before{background:radial-gradient(circle,var(--brand1) 0%,transparent 65%);top:-22vmax;left:-18vmax}
+.login-body::after{background:radial-gradient(circle,var(--brand2) 0%,transparent 65%);bottom:-24vmax;right:-18vmax;animation-delay:-8s}
+@keyframes blobMove{0%{transform:translate(0,0) scale(1)}50%{transform:translate(6vmax,4vmax) scale(1.08)}100%{transform:translate(-4vmax,6vmax) scale(.95)}}
+.rive-login{position:relative;z-index:1;background:rgba(255,255,255,.86);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.7)}
+.teddy-wrap{background:linear-gradient(160deg,#ffe3ee 0%,#efe6ff 50%,#ddf5ee 100%)}
+.login-btn{background:linear-gradient(135deg,var(--brand1),#8a4dff 55%,var(--brand2))!important;background-size:170% 170%!important;animation:brandShift 6s ease infinite}
+.fld-l input.bad{border-color:var(--red);background:#fff5f6;box-shadow:0 0 0 3px rgba(228,30,63,.14)}
+#lerr{margin:0;font-size:13px;font-weight:600;color:var(--red);background:#fff1f3;border:1px solid #f6c3cc;border-radius:8px;padding:8px 10px}
+.login-pop{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:rgba(28,20,60,.35);backdrop-filter:blur(3px);animation:fadeIn .2s ease}
+.login-pop[hidden]{display:none}
+.login-pop-card{background:#fff;border-radius:18px;padding:28px 34px;text-align:center;box-shadow:0 20px 60px rgba(75,44,201,.25);animation:popIn .35s cubic-bezier(.2,1.4,.4,1);min-width:min(320px,86vw)}
+.login-pop-card h2{margin:12px 0 4px;font-size:20px}
+.login-pop-card p{margin:0 0 6px;color:var(--muted);font-size:14px}
+.login-pop-card small{color:#9aa0a6}
+.ok-ring svg{width:68px;height:68px;fill:none;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round}
+.ok-ring circle{stroke:#31a24c;stroke-dasharray:151;stroke-dashoffset:151;animation:draw .6s ease forwards}
+.ok-ring path{stroke:#31a24c;stroke-dasharray:40;stroke-dashoffset:40;animation:draw .4s .45s ease forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes popIn{from{transform:scale(.7);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.login-body::before,.login-body::after,.login-btn{animation:none!important}}

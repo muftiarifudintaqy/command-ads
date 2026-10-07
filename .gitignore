@@ -1,6 +1,11 @@
+# rahasia — JANGAN di-commit
 config.php
 .env
+
+# log & cache
 logs/
 *.log
+
+# sistem
 .DS_Store
 .vscode/

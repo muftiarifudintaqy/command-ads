@@ -41,7 +41,7 @@ const PRESET = {
 // ---------- STATE ----------
 const S = {
   preset: "today", from: TODAY, to: TODAY,
-  level: "campaign", view: "all", pf: "all", acc: null, q: "", accQ: "",
+  level: "campaign", view: "all", brand: "all", pf: "all", acc: null, q: "", accQ: "",
   aiFilter: null, sort: { k: "spend", dir: -1 }, sel: new Set(), lastSync: null,
   panel: null, loading: "", busy: false
 };
@@ -50,6 +50,7 @@ let RANGE = [TODAY];
 // ---------- DATA ----------
 const ACCOUNTS = CFG.accounts.map(a => ({
   id: a.id.replace(/^act_/, ""), act: a.id.startsWith("act_") ? a.id : "act_" + a.id, name: a.name, pf: a.group, tokenKey: a.token,
+  brand: a.brand || (a.token.charAt(0).toUpperCase() + a.token.slice(1)),   // brand = dari token (prepare/skinlyfe), bisa ditimpa 'brand' di config
   currency: "IDR", campaigns: [], ads: [], days: {}, daysAll: {}, daysCamp: {}, err: null, loaded: false, maps: null, raw: null, structAt: 0,
   spendSrc: (CFG.spendSource || { prepare: "account", skinlyfe: "campaign" })[a.token] || "account"
 }));
@@ -310,7 +311,7 @@ function adMetrics(ad) {  // frequency = rata-rata harian tertimbang impression 
 function sumM(list) { const m = zero(); list.forEach(x => { for (const k of ["spend", "impr", "clicks", "atc", "purch", "value", "vc", "v3", "thru", "fImpr", "n"]) m[k] += x[k] || 0; }); return derive(m); }
 
 const adsOf = e => e.level === "ad" ? [e] : e.ads;
-const pfOk = acc => S.pf === "all" || acc.pf === S.pf;
+const pfOk = acc => (S.brand === "all" || acc.brand === S.brand) && (S.pf === "all" || acc.pf === S.pf);
 const adHay = a => [a.name, a.desc, a.camp.name, a.adset.name, a.acc.name, a.acc.id, a.id, a.camp.id, a.adset.id].join(" ").toLowerCase();
 let QSET = null;
 const qOk = a => !QSET || QSET.has(a.id);
@@ -464,7 +465,7 @@ function entityPayload(e) {
   return p;
 }
 // Logo Montera (pengganti ikon bintang)
-const MLOGO = `<svg class="mlogo" viewBox="0 0 26 24" aria-hidden="true"><defs><linearGradient id="mlg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7b4dff"/><stop offset="1" stop-color="#4b2cc9"/></linearGradient></defs><g fill="url(#mlg)" transform="skewX(-14) translate(5 0)"><rect x="1" y="11" width="4.2" height="11" rx="2.1"/><rect x="7.4" y="6" width="4.2" height="16" rx="2.1"/><rect x="13.8" y="1.5" width="4.2" height="20.5" rx="2.1"/></g></svg>`;
+const MLOGO = `<img class="mlogo" src="assets/montera-icon.png" alt="" width="18" height="15">`;
 const AI_CFG = CFG.ai || { provider: "gemini" };
 const AI_NAME = "Montera AI";
 function parseJSONText(text) {
@@ -474,7 +475,9 @@ function parseJSONText(text) {
 }
 async function askClaude(system, payload) { return askAI(system, [{ role: "user", content: "Data (JSON):\n" + JSON.stringify(payload) }]); }
 async function askAI(system, msgs) {   // provider & API key diatur di config.php (server)
-  const j = await api("ai", { system, messages: msgs, mode: store.get("ac_ai_mode", "deep") });
+  const last = String(msgs[msgs.length - 1]?.content || "").replace(/^\[Filter[^\]]*\]\s*/, "");
+  const smalltalk = /^(halo|hallo|hai|hi|hello|hey|p|ping|tes|test|pagi|siang|sore|malam|selamat \w+|makasih|terima ?kasih|thanks|thank you|ok(e|ay)?|sip|mantap)\b[\s\w!.?,]{0,25}$/i.test(last.trim());
+  const j = await api("ai", { system, messages: msgs, mode: smalltalk ? "fast" : store.get("ac_ai_mode", "deep") });   // sapaan → jawab cepat
   if (j.error) throw new Error(j.error.message || j.error);
   const out = parseJSONText(j.text);
   if (out && typeof out === "object") out._model = j.model;
@@ -569,13 +572,13 @@ function visibleRows() {
 // =========================================================
 // RENDER
 // =========================================================
-const LOGO = `<span class="plogo"><svg viewBox="0 0 36 24"><path d="M8.5 2C4.4 2 1.5 6.9 1.5 12.4c0 5.6 2.3 9.6 6.2 9.6 2.9 0 4.8-2.2 7.4-6.6l1.9-3.2 1.7 2.8c2.9 4.9 5 7 8.1 7 3.8 0 6.1-3.9 6.1-9.4C32.9 6.6 30 2 25.6 2c-2.8 0-4.9 2-7.5 5.8C15.6 4 13.4 2 8.5 2Z" fill="currentColor"/></svg></span>`;
+const LOGO = `<span class="plogo"><img src="assets/montera-icon.png" alt="" width="16" height="14"></span>`;
 const rangeText = () => S.from === S.to ? (S.from === TODAY ? `${fmtD(S.from)}, 00:00–${hhmm(new Date())}` : fmtD(S.from)) : `${fmtD(S.from)} – ${fmtD(S.to)}`;
 const periodLabel = () => S.preset === "custom" ? "Custom" : PRESET[S.preset][0];
 
 function renderHeader() {
   const acc = ACCOUNTS.find(a => a.id === S.acc);
-  $("#scopeLabel").innerHTML = acc ? `${LOGO}<b>${esc(acc.name)}</b><span class="muted">ID ${acc.id}</span>` : `${LOGO}<b>Semua akun</b><span class="muted">${ACCOUNTS.filter(pfOk).length} ad accounts${S.pf !== "all" ? " · " + esc(S.pf) : ""}</span>`;
+  $("#scopeLabel").innerHTML = acc ? `${LOGO}<b>${esc(acc.name)}</b><span class="muted">ID ${acc.id}</span>` : `${LOGO}<b>Semua akun</b><span class="muted">${ACCOUNTS.filter(pfOk).length} ad accounts${S.brand !== "all" ? " · " + esc(S.brand) : ""}${S.pf !== "all" ? " · " + esc(S.pf) : ""}</span>`;
   const errs = ACCOUNTS.filter(a => a.err);
   $("#srcBadge").className = "src " + (errs.length ? "warn" : "live");
   $("#srcBadge").innerHTML = `<span class="flame">🔥</span><b>LIVE</b>${errs.length ? ` · ${errs.length} akun gagal sync` : " · Meta API"}`;
@@ -597,13 +600,19 @@ function accCard(sum, sub, m, extra, sel, attr, live, err) {
       <div><small>Cost per purchase</small><b>${rp(m.cpa)}</b></div>
       <div><small>Adds to cart</small><b>${num(m.atc)}</b></div>
     </div>`}
-    <div class="acc-f">${extra}</div>
+    <div class="acc-f">${extra}${err ? "" : `<span class="acc-dl" role="button" tabindex="0" title="Download Excel ${esc(sub[0])}" data-export="${sum ? "all" : attr.match(/data-acc="([^"]*)"/)[1]}"><svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"/></svg>Excel</span>`}</div>
   </button>`;
 }
 function renderAccounts() {
   const pfs = [...new Set(ACCOUNTS.map(a => a.pf))];
-  $("#pfPills").innerHTML = [["all", "Semua", ACCOUNTS.length], ...pfs.map(p => [p, p, ACCOUNTS.filter(a => a.pf === p).length])]
-    .map(([k, t, n]) => `<button class="pill ${S.pf === k ? "on" : ""}" data-pf="${esc(k)}">${esc(t)}<span>${n}</span></button>`).join("");
+  const brands = [...new Set(ACCOUNTS.map(a => a.brand))];
+  const inBrand = ACCOUNTS.filter(a => S.brand === "all" || a.brand === S.brand);
+  const groups2 = [...new Set(inBrand.map(a => a.pf))];
+  $("#pfPills").innerHTML =
+    [["all", "Semua brand", ACCOUNTS.length], ...brands.map(b => [b, b, ACCOUNTS.filter(a => a.brand === b).length])]
+      .map(([k, t, n]) => `<button class="pill brand ${S.brand === k ? "on" : ""}" data-brand="${esc(k)}">${esc(t)}<span>${n}</span></button>`).join("") +
+    (S.brand !== "all" && groups2.length > 1 ? `<span class="pill-sep"></span>` + [["all", `Semua ${S.brand}`, inBrand.length], ...groups2.map(p => [p, p, inBrand.filter(a => a.pf === p).length])]
+      .map(([k, t, n]) => `<button class="pill ${S.pf === k ? "on" : ""}" data-pf="${esc(k)}">${esc(t)}<span>${n}</span></button>`).join("") : "");
   let accs = ACCOUNTS.filter(a => pfOk(a) && (a.name + " " + a.id + " " + a.pf).toLowerCase().includes(S.accQ));
   if (S.q) accs = accs.filter(a => a.ads.some(qOk));
   const tot = sumM(accs.filter(a => !a.err).map(accMetrics));
@@ -613,7 +622,7 @@ function renderAccounts() {
   const groups = {};
   accs.forEach(a => (groups[a.pf] ||= []).push(a));
   Object.entries(groups).forEach(([pf, list]) => {
-    html += `<div class="acc-group"><div class="acc-group-label">${esc(pf)} · ${list.length}</div><div class="acc-row">` + list.map(a => {
+    html += `<div class="acc-group"><div class="acc-group-label">${esc(list[0].brand !== pf ? list[0].brand + " · " + pf : pf)} · ${list.length}</div><div class="acc-row">` + list.map(a => {
       const ads = a.ads.filter(qOk), live = ads.filter(isOn).length;
       const s = ads.filter(x => AI.get(x.id)?.v === "scale").length, k = ads.filter(x => isOn(x) && AI.get(x.id)?.v === "kill").length;
       const extra = qInfo(ads) + (s ? `<span class="vb v-scale">▲ ${s}</span>` : "") + (k ? `<span class="vb v-kill">■ ${k} matikan</span>` : "") + (!S.q && !s && !k ? `<span class="muted">${live} iklan aktif</span>` : "");
@@ -979,6 +988,8 @@ async function applyStatus(ids, on) {
 }
 document.addEventListener("click", ev => {
   const t = ev.target;
+  // tombol Excel di kartu akun harus dicek PALING AWAL — kalau tidak, klik ikut dianggap "pilih akun" dan download tidak jalan
+  const ex = t.closest("[data-export]"); if (ex) { ev.preventDefault(); ev.stopPropagation(); doExport(ex.dataset.export, ex); return; }
   const cl = t.closest("[data-claude]"); if (cl) { runClaude(cl.dataset.claude); return; }
   if (t.closest("#clBulkBtn")) { runClaudeBulk(); return; }
   const tog = t.closest("[data-tog]"); if (tog) { const e = BY_ID.get(tog.dataset.tog); applyStatus([e.id], !e.on); return; }
@@ -987,6 +998,7 @@ document.addEventListener("click", ev => {
   const ct = t.closest("[data-content]"); if (ct) { setQ(ct.dataset.content); S.view = "all"; S.level = "ad"; closePanel(); render(); return; }
   const acc = t.closest("[data-acc]"); if (acc) { S.acc = acc.dataset.acc || null; S.sel.clear(); render(); return; }
   const fn = t.closest("[data-funnel]"); if (fn) { S.f.funnel = S.f.funnel === fn.dataset.funnel ? "all" : fn.dataset.funnel; render(); return; }
+  const br = t.closest("[data-brand]"); if (br) { S.brand = br.dataset.brand; S.pf = "all"; S.acc = null; render(); return; }
   const pf = t.closest("[data-pf]"); if (pf) { S.pf = pf.dataset.pf; S.acc = null; render(); return; }
   const vw = t.closest("[data-view]"); if (vw) { S.view = vw.dataset.view; if (S.view !== "ai") S.aiFilter = null; if (S.view === "winning" && S.level === "campaign") S.level = "ad"; render(); return; }
   const go = t.closest("[data-goto]"); if (go) { const g = go.dataset.goto; S.view = g === "kill" ? "ai" : g; S.aiFilter = g === "kill" ? "kill" : null; if (g === "kill") S.level = "ad"; render(); return; }
@@ -1066,47 +1078,154 @@ $("#railSync").addEventListener("click", e => manualSync(e.currentTarget));
 $("#overlay").addEventListener("click", closePanel);
 $("#panelClose").addEventListener("click", closePanel);
 document.addEventListener("keydown", e => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.("[data-export]")) { e.preventDefault(); doExport(e.target.dataset.export, e.target); return; }
   if (e.key === "Escape") { closePanel(); closeDP(); toggleChat(false); }
   if (e.key === "/" && !["INPUT", "SELECT"].includes(document.activeElement.tagName)) { e.preventDefault(); $("#q").focus(); }
 });
-function loadXLSX() {   // library Excel (SheetJS) dimuat hanya saat tombol Export diklik
-  if (window.XLSX) return Promise.resolve(window.XLSX);
-  return new Promise((ok, no) => { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"; sc.onload = () => ok(window.XLSX); sc.onerror = () => no(new Error("Gagal memuat library Excel (cek internet).")); document.head.appendChild(sc); });
+function loadXLSX() {   // xlsx-js-style = SheetJS + dukungan warna/border/format (dimuat saat tombol Export diklik)
+  if (window.XLSX?.__styled) return Promise.resolve(window.XLSX);
+  const load = src => new Promise((ok, no) => { const sc = document.createElement("script"); sc.src = src; sc.onload = () => ok(window.XLSX); sc.onerror = no; document.head.appendChild(sc); });
+  return load("https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js").then(X => { X.__styled = true; return X; })
+    .catch(() => window.XLSX ? window.XLSX : load("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"))
+    .catch(() => { throw new Error("Gagal memuat library Excel (cek internet)."); });
+}
+
+// ---------- isi Excel ----------
+const MKIND = { spend: "rp", value: "rp", cpatc: "rp", cpvc: "rp", cpc: "rp", cpa: "rp", roas: "dec", freq: "dec", hook: "pct", hold: "pct", ctr: "pct", purch: "int", atc: "int", vc: "int", impr: "int" };
+// naming = segmen terakhir nama campaign/iklan ("8 SEP - BOFU IE - LF - LF 002D" → "LF 002D"); "- Copy 2" diabaikan. "selvia 01" ≠ "selvia 02".
+const namingOf = n => String(n || "").replace(/\s*-\s*copy(\s*\d+)?\s*$/i, "").split(/\s+-\s+/).pop().replace(/\s+/g, " ").trim() || "(tanpa naming)";
+function namingSummary(ents, mOf) {
+  const g = new Map();
+  ents.forEach(e => { const label = namingOf(e.name), k = label.toLowerCase(); if (!g.has(k)) g.set(k, { label, list: [] }); g.get(k).list.push(e); });
+  const groups = [...g.values()].map(x => ({ ...x, m: sumM(x.list.map(mOf)), accs: [...new Set(x.list.map(e => e.acc.name))] })).sort((a, b) => b.m.spend - a.m.spend);
+  const word = LVL[S.level][0];
+  return {
+    title: `Summary per naming · ${groups.length} naming dari ${ents.length} ${word}`,
+    head: ["Naming", `Jumlah ${word}`, "Jumlah akun", "Akun", ...MCOLS.map(c => c.t), `Daftar ${word}`],
+    kinds: ["txt", "int", "int", "txt", ...MCOLS.map(c => MKIND[c.k]), "txt"],
+    rows: groups.map(x => [x.label, x.list.length, x.accs.length, x.accs.join(", "), ...MCOLS.map(c => c.x(x.m)), x.list.map(e => e.name).join("  |  ")]),
+    total: ["TOTAL", ents.length, new Set(ents.map(e => e.acc.name)).size, "", ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
+    dup: groups.map(x => x.list.length > 1)
+  };
 }
 function exportData() {
-  const mh = MCOLS.map(c => c.t), mv = m => MCOLS.map(c => c.x(m));
-  if (S.view === "daily") return { name: "Rekap harian", head: ["Tanggal", ...mh], rows: dailyFrom(dailySource()).map(({ d, m }) => [d, ...mv(m)]) };
+  const mh = MCOLS.map(c => c.t), mk = MCOLS.map(c => MKIND[c.k]), mv = m => MCOLS.map(c => c.x(m));
+  const viewName = { all: "All ads", ai: "Montera AI", winning: "Winning ads", content: "Winning content", daily: "Rekap harian", check: "Cek data" }[S.view];
+  if (S.view === "daily") {
+    const rows = dailyFrom(dailySource());
+    return { title: `Rekap harian · ${rangeText()}`, head: ["Tanggal", ...mh], kinds: ["txt", ...mk], rows: rows.map(({ d, m }) => [fmtDay(d), ...mv(m)]), total: ["TOTAL", ...mv(sumM(rows.map(r => r.m)))] };
+  }
   if (S.view === "check") {
     const sumD = days => RANGE.reduce((t, d) => t + (days[d]?.[0] || 0), 0);
-    return { name: "Cek data", head: ["Akun", "ID", "Spend level akun", "Spend campaign Active+Paused", "Spend per iklan", "Purchases", "Conversion value"],
-      rows: scopedAccounts().filter(a => !a.err).map(a => { const m = daysM(a.days); return [a.name, a.id, Math.round(sumD(a.daysAll)), Math.round(sumD(a.daysCamp)), Math.round(a.ads.reduce((t, x) => t + sumD(x.days), 0)), m.purch, Math.round(m.value)]; }) };
+    const rows = scopedAccounts().filter(a => !a.err).map(a => { const m = daysM(a.days); return [a.name, a.id, Math.round(sumD(a.daysAll)), Math.round(sumD(a.daysCamp)), Math.round(a.ads.reduce((t, x) => t + sumD(x.days), 0)), m.purch, Math.round(m.value)]; });
+    return { title: `Cek data · ${rangeText()}`, head: ["Akun", "ID", "Spend level akun", "Spend campaign Active+Paused", "Spend per iklan", "Purchases", "Conversion value"], kinds: ["txt", "txt", "rp", "rp", "rp", "int", "rp"], rows };
   }
   if (S.view === "content") {
-    const groups = {}; ADS.filter(a => scopeOk(a) && qOk(a)).forEach(a => (groups[a.ck] ||= { name: a.name, ads: [] }).ads.push(a));
-    return { name: "Winning content", head: ["Konten", "Jumlah akun", "Jumlah iklan", ...mh],
-      rows: Object.values(groups).map(g => { const m = sumM(g.ads.map(a => AM.get(a.id))); return [g.name, new Set(g.ads.map(a => a.acc.id)).size, g.ads.length, ...mv(m)]; }).filter(r => r[3] > 0) };
+    const g = {}; ADS.filter(a => scopeOk(a) && qOk(a)).forEach(a => (g[a.ck] ||= { name: a.name, ads: [] }).ads.push(a));
+    const list = Object.values(g).map(x => ({ ...x, m: sumM(x.ads.map(a => AM.get(a.id))) })).filter(x => x.m.spend > 0).sort((a, b) => b.m.spend - a.m.spend);
+    return { title: `Winning content · ${rangeText()}`, head: ["Konten", "Jumlah akun", "Jumlah iklan", ...mh], kinds: ["txt", "int", "int", ...mk],
+      rows: list.map(x => [x.name, new Set(x.ads.map(a => a.acc.id)).size, x.ads.length, ...mv(x.m)]), total: ["TOTAL", "", list.reduce((t, x) => t + x.ads.length, 0), ...mv(sumM(list.map(x => x.m)))] };
   }
-  return { name: LVL[S.level][2] + "s", head: ["Level", "Akun", "ID", "Nama", "Campaign", "Delivery", "Rekomendasi", "Alasan", "Budget harian", ...mh],
-    rows: visibleRows().map(e => { const m = M.get(e.id), ai = AI.get(e.id), c = clGet(e.id)?.data;
-      return [LVL[e.level][2], e.acc.name, e.id, e.name, e.level === "campaign" ? "" : e.camp.name, delivery(e).t, V[c?.verdict]?.label || V[ai.v].label, c?.summary || ai.r[0], e.budget ? Math.round(e.budget) : null, ...mv(m)]; }) };
+  const ents = visibleRows(), mOf = e => M.get(e.id);
+  const verdict = e => { const c = clGet(e.id)?.data; return { v: c && V[c.verdict] ? c.verdict : AI.get(e.id).v, why: c?.summary || AI.get(e.id).r[0] }; };
+  return {
+    title: `${viewName} · ${LVL[S.level][2]}s · ${rangeText()}`,
+    head: ["Akun", LVL[S.level][2] === "Ad" ? "Iklan" : LVL[S.level][2], "Naming", "Delivery", "Rekomendasi", "Budget harian", ...mh, "Alasan rekomendasi", "Campaign", "ID"],
+    kinds: ["txt", "txt", "txt", "txt", "verdict", "rp", ...mk, "txt", "txt", "id"],
+    rows: ents.map(e => { const vd = verdict(e); return [e.acc.name, e.name, namingOf(e.name), delivery(e).t, V[vd.v].label, e.budget ? Math.round(e.budget) : null, ...mv(mOf(e)), vd.why, e.level === "campaign" ? "" : e.camp.name, e.id]; }),
+    total: ["TOTAL", `${ents.length} ${LVL[S.level][1]}`, "", "", "", ents.reduce((t, e) => t + (e.budget || 0), 0) || null, ...mv(sumM(ents.map(mOf))), "", "", ""],
+    summary: namingSummary(ents, mOf)
+  };
 }
-$("#btnExport").addEventListener("click", async e => {
-  const btn = e.currentTarget, old = btn.textContent;
-  btn.disabled = true; btn.textContent = "Menyiapkan Excel…";
+function exportFor(accId) {   // hitung ulang khusus 1 akun (atau semua), lalu kembalikan tampilan seperti semula
+  const prev = S.acc; S.acc = accId; compute();
+  const d = exportData();
+  S.acc = prev; compute();
+  return d;
+}
+
+// ---------- desain sheet ----------
+const XS = (() => {
+  const line = { style: "thin", color: { rgb: "DADDE1" } }, border = { top: line, bottom: line, left: line, right: line };
+  const FMT = { rp: '"Rp"#,##0', int: "#,##0", dec: "0.00", pct: '0.00"%"' };
+  const VCOL = { "Naikkan budget": "1E8E3E", "Potensi winning": "7E3FF2", "Optimasi": "B06000", "Matikan": "D01C39", "Pantau": "606770" };
+  return {
+    title: { font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } }, fill: { patternType: "solid", fgColor: { rgb: "4B2CC9" } }, alignment: { vertical: "center", horizontal: "left", indent: 1 } },
+    sub: { font: { italic: true, sz: 10, color: { rgb: "65676B" } }, alignment: { vertical: "center", horizontal: "left", indent: 1 } },
+    head: { font: { bold: true, sz: 11, color: { rgb: "FFFFFF" } }, fill: { patternType: "solid", fgColor: { rgb: "6A4DFF" } }, alignment: { vertical: "center", horizontal: "center", wrapText: true }, border },
+    cell: (kind, zebra, extra = {}) => ({ border, font: { sz: 11, ...(extra.font || {}) }, fill: extra.fill || (zebra ? { patternType: "solid", fgColor: { rgb: "F6F4FF" } } : undefined),
+      alignment: { vertical: "center", horizontal: ["rp", "int", "dec", "pct"].includes(kind) ? "right" : kind === "verdict" ? "center" : "left", wrapText: false }, numFmt: FMT[kind] }),
+    total: kind => ({ border: { ...border, top: { style: "medium", color: { rgb: "4B2CC9" } } }, font: { bold: true, sz: 11, color: { rgb: "1C2B33" } }, fill: { patternType: "solid", fgColor: { rgb: "E5DEFF" } },
+      alignment: { vertical: "center", horizontal: ["rp", "int", "dec", "pct"].includes(kind) ? "right" : "left" }, numFmt: FMT[kind] }),
+    vcol: VCOL
+  };
+})();
+function buildSheet(XLSX, d, title) {
+  const kinds = d.kinds || d.head.map(() => "txt"), n = d.head.length;
+  const aoa = [[title], [d.title || ""], d.head, ...d.rows, ...(d.total ? [d.total] : [])];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const enc = (r, c) => XLSX.utils.encode_cell({ r, c });
+  const set = (r, c, s) => { const a = enc(r, c); if (!ws[a]) ws[a] = { t: "s", v: "" }; ws[a].s = s; if (s.numFmt && ws[a].t === "n") ws[a].z = s.numFmt; };
+  for (let c = 0; c < n; c++) { set(0, c, XS.title); set(1, c, XS.sub); set(2, c, XS.head); }
+  const roasCol = d.head.indexOf("Purchase ROAS");
+  d.rows.forEach((row, i) => {
+    const r = i + 3, zebra = i % 2 === 1;
+    for (let c = 0; c < n; c++) {
+      let extra = {};
+      if (kinds[c] === "verdict" && XS.vcol[row[c]]) extra.font = { bold: true, color: { rgb: XS.vcol[row[c]] } };
+      if (c === roasCol && typeof row[c] === "number" && row[d.head.indexOf("Purchases with shared items")] > 0) extra.font = { bold: true, color: { rgb: row[c] >= TARGET.roas ? "1E8E3E" : "D01C39" } };
+      if (d.dup?.[i] && c === 0) extra = { font: { bold: true, color: { rgb: "4B2CC9" } }, fill: { patternType: "solid", fgColor: { rgb: "FFF4D6" } } };   // naming yang muncul > 1x ditandai
+      if (kinds[c] === "id") { const a = enc(r, c); if (ws[a]) { ws[a].t = "s"; ws[a].v = String(row[c]); } }
+      set(r, c, XS.cell(kinds[c], zebra, extra));
+    }
+  });
+  if (d.total) { const r = d.rows.length + 3; for (let c = 0; c < n; c++) set(r, c, XS.total(kinds[c])); }
+  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: n - 1 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: n - 1 } }];
+  ws["!rows"] = [{ hpt: 28 }, { hpt: 18 }, { hpt: 36 }];
+  ws["!cols"] = d.head.map((h, i) => {
+    const longest = Math.max(...d.rows.slice(0, 400).map(r => { const v = r[i]; return typeof v === "number" ? (kinds[i] === "rp" ? String(Math.round(v)).length + 6 : String(v).length + 2) : String(v ?? "").length; }), 0);
+    const max = ["Alasan rekomendasi", "Akun", `Daftar ${LVL[S.level][0]}`].includes(h) ? 48 : 46;
+    return { wch: Math.min(max, Math.max(10, Math.min(String(h).length, 18), longest + 2)) };
+  });
+  ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 2, c: 0 }, e: { r: d.rows.length + 2, c: n - 1 } }) };
+  return ws;
+}
+
+async function doExport(target, btn) {   // target: undefined = sesuai tampilan, "all" = semua akun (+1 sheet per akun), atau ID akun
+  const label = btn?.innerHTML; if (btn) { btn.classList.add("busy"); if (btn.id === "btnExport") btn.textContent = "Menyiapkan Excel…"; }
   try {
-    const XLSX = await loadXLSX(), d = exportData();
-    const ws = XLSX.utils.aoa_to_sheet([d.head, ...d.rows]);
-    ws["!cols"] = d.head.map((h, i) => ({ wch: Math.min(60, Math.max(String(h).length, ...d.rows.slice(0, 300).map(r => String(r[i] ?? "").length)) + 2) }));
-    ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: d.rows.length, c: d.head.length - 1 } }) };
-    const info = XLSX.utils.aoa_to_sheet([["Montera Ads — export"], ["Tanggal data", rangeText()], ["Akun", S.acc ? ACCOUNTS.find(a => a.id === S.acc).name : `Semua (${S.pf === "all" ? "semua portfolio" : S.pf})`], ["Pencarian", S.q || "-"], ["Funnel", S.f.funnel], ["Diekspor", new Date().toLocaleString("id-ID")]]);
-    info["!cols"] = [{ wch: 16 }, { wch: 50 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, d.name.slice(0, 30));
+    const XLSX = await loadXLSX(), wb = XLSX.utils.book_new(), used = new Set();
+    const sheetName = name => { let n = String(name).replace(/[\[\]*?\/\\:]/g, "").slice(0, 31) || "Sheet", k = 2; while (used.has(n)) n = n.slice(0, 28) + " " + k++; used.add(n); return n; };
+    const add = (d, name) => {
+      XLSX.utils.book_append_sheet(wb, buildSheet(XLSX, d, `MONTERA ADS · ${name}`), sheetName(name));
+      if (d.summary && d.summary.rows.length) XLSX.utils.book_append_sheet(wb, buildSheet(XLSX, d.summary, `MONTERA ADS · ${name} · Summary naming`), sheetName(`${name.slice(0, 22)} · Naming`));
+    };
+    let fileTag;
+    if (target && target !== "all") {                       // 1 akun saja (tombol Excel di kartu akun)
+      const acc = ACCOUNTS.find(a => a.id === target);
+      add(exportFor(target), acc.name); fileTag = acc.name;
+    } else if (S.acc && target !== "all") {                 // tombol Export saat 1 akun sedang dipilih
+      const acc = ACCOUNTS.find(a => a.id === S.acc);
+      add(exportData(), acc.name); fileTag = acc.name;
+    } else {                                                // semua akun: sheet gabungan + summary, lalu per akun + summary
+      const prev = S.acc;
+      add(exportFor(null), "Semua akun");
+      if (S.view !== "check") ACCOUNTS.filter(a => !a.err && a.loaded && (S.brand === "all" || a.brand === S.brand) && (S.pf === "all" || a.pf === S.pf))
+        .forEach(a => { const d = exportFor(a.id); if (d.rows.length) add(d, a.name); });
+      S.acc = prev; compute();
+      fileTag = S.pf !== "all" ? S.pf : S.brand !== "all" ? S.brand : "semua-akun";
+    }
+    const info = buildSheet(XLSX, { title: "Keterangan export", head: ["Keterangan", "Isi"], rows: [
+      ["Tampilan", { all: "All ads", ai: "Montera AI", winning: "Winning ads", content: "Winning content", daily: "Rekap harian", check: "Cek data" }[S.view] + (["all", "ai", "winning"].includes(S.view) ? " · " + LVL[S.level][2] + "s" : "")],
+      ["Tanggal data", rangeText()], ["Akun", fileTag], ["Pencarian", S.q || "-"], ["Funnel", S.f.funnel],
+      ["Naming", "Bagian terakhir nama setelah tanda ' - ' (mis. 'LF 002D'). Nama yang persis sama dijumlah di sheet 'Naming'."],
+      ["Total", "Baris TOTAL = jumlah semua baris di sheet itu"], ["Diekspor", new Date().toLocaleString("id-ID")]] }, "MONTERA ADS · Info");
     XLSX.utils.book_append_sheet(wb, info, "Info");
-    XLSX.writeFile(wb, `montera-ads-${d.name.toLowerCase().replace(/\s+/g, "-")}-${S.from}_${S.to}.xlsx`);
+    XLSX.writeFile(wb, `montera-ads-${String(fileTag).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${S.view === "daily" ? "rekap-harian" : S.view === "all" ? LVL[S.level][1].replace(" ", "") : S.view}-${S.from}_${S.to}.xlsx`, { cellStyles: true });
   } catch (err) { alert(err.message); }
-  btn.disabled = false; btn.textContent = old;
-});
+  if (btn) { btn.classList.remove("busy"); btn.innerHTML = label; }
+}
+$("#btnExport").addEventListener("click", e => doExport(undefined, e.currentTarget));
 
 
 // =========================================================
@@ -1120,7 +1239,11 @@ Kamu BISA mengusulkan tindakan yang akan dieksekusi dashboard ke Meta SETELAH us
 - {"type":"activate","id":"...","reason":"..."}
 - {"type":"set_budget","id":"<id campaign/adset yang punya budget_harian>","value":<budget harian baru dalam Rupiah>,"reason":"..."}
 Aturan tindakan: hanya pakai id yang ada di data. Naik budget maksimal +30% per tindakan, turun maksimal -50% (lebih buruk dari itu → pause). Jangan usulkan tindakan kalau datanya belum cukup — jelaskan saja kenapa. Kamu TIDAK bisa mengedit video/teks creative; untuk itu beri saran konkret (hook, angle, CTA, thumbnail) yang dikerjakan tim.
-CARA MENJAWAB (wajib):
+GAYA NGOBROL:
+- Kalau pesan user cuma sapaan/basa-basi (halo, hai, pagi, tes, makasih, oke, dll) → balas ramah & singkat, contoh: "Halo kak! 👋 Aku Montera AI. Ada yang bisa aku bantu soal iklan hari ini?" lalu tawarkan 3 contoh pertanyaan yang relevan dengan data (mis. campaign paling boncos, yang layak di-scale, rekap per funnel). JANGAN langsung analisis, actions harus [].
+- Kalau ditanya kamu siapa/pakai model apa → jawab: "Aku Montera AI, analis iklan internal Montera." Jangan menyebut nama model atau perusahaan AI apa pun.
+- Kalau pertanyaannya serius soal iklan → fokus, serius, teliti. Sebelum menulis angka, cek ulang angkanya ke DATA DASHBOARD; jangan membulatkan sembarangan.
+CARA MENJAWAB ANALISIS (wajib untuk pertanyaan soal iklan):
 - Pakai HANYA data di DATA DASHBOARD sesuai "filter" saat ini. Kalau filter = 1 akun, JANGAN menyebut atau menyarankan campaign dari akun lain. Abaikan angka dari jawaban sebelumnya kalau filter/tanggal berubah.
 - Mulai dengan **Ringkasan**: total spend, value, ROAS, purchase di filter ini + 1 kalimat kondisi.
 - Lalu **Yang bikin boncos** (nama campaign + spend + ROAS/CPP + kenapa: hook/CTR rendah? ATC banyak tapi purchase sedikit? frequency tinggi?) dan **Yang layak di-scale** (nama + angka).

@@ -6,22 +6,106 @@ $C = require __DIR__ . '/config.php';
 if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(16));
 $v = @filemtime(__DIR__ . '/app.js') . @filemtime(__DIR__ . '/style.css');   // versi file (anti-cache)
 
-// ---- login (aktif kalau app_password diisi di config.php) ----
-if (($C['app_password'] ?? '') !== '') {
+// ---- login (aktif kalau app_password ATAU login_users diisi di config.php) ----
+$loginUsers = $C['login_users'] ?? [];
+$loginOn = ($C['app_password'] ?? '') !== '' || !empty($loginUsers);
+if ($loginOn) {
     if (isset($_GET['logout'])) { session_destroy(); header('Location: index.php'); exit; }
-    if (isset($_POST['password'])) {
-        if (hash_equals($C['app_password'], (string)$_POST['password'])) { session_regenerate_id(true); $_SESSION['ac_ok'] = true; header('Location: index.php'); exit; }
-        $loginError = 'Password salah.';
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['password'])) {
+        $u = trim((string)($_POST['username'] ?? ''));
+        $p = (string)$_POST['password'];
+        $reason = '';
+        if ($loginUsers) {                                   // login per orang (email tidak peka huruf besar/kecil)
+            $found = null;
+            foreach ($loginUsers as $user => $pw) if (strcasecmp(trim((string)$user), $u) === 0) { $found = (string)$pw; break; }
+            if ($found === null) $reason = 'user';
+            $ok = $found !== null && hash_equals($found, $p);
+            if ($found !== null && !$ok) $reason = 'password';
+        } else {                                             // 1 password bersama
+            $ok = hash_equals((string)$C['app_password'], $p);
+            if (!$ok) $reason = 'password';
+        }
+        if ($ok) { session_regenerate_id(true); $_SESSION['ac_ok'] = true; $_SESSION['ac_user'] = $u !== '' ? strtolower($u) : 'admin'; }
+        else usleep(400000);   // perlambat tebak-tebakan password
+        if (!empty($_SERVER['HTTP_X_LOGIN_AJAX'])) { header('Content-Type: application/json'); echo json_encode(['ok' => $ok, 'reason' => $reason, 'user' => $ok ? ($_SESSION['ac_user'] ?? '') : '']); exit; }
+        if ($ok) { header('Location: index.php'); exit; }
+        $loginError = $reason === 'user' ? 'Email tidak terdaftar.' : 'Password salah.';
     }
     if (empty($_SESSION['ac_ok'])) { ?>
-<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Masuk — Ads Command</title><link rel="stylesheet" href="style.css?v=<?= $v ?>"></head>
-<body class="login-body"><form class="login" method="post">
-  <svg viewBox="0 0 36 24" width="44" height="30"><path d="M8.5 2C4.4 2 1.5 6.9 1.5 12.4c0 5.6 2.3 9.6 6.2 9.6 2.9 0 4.8-2.2 7.4-6.6l1.9-3.2 1.7 2.8c2.9 4.9 5 7 8.1 7 3.8 0 6.1-3.9 6.1-9.4C32.9 6.6 30 2 25.6 2c-2.8 0-4.9 2-7.5 5.8C15.6 4 13.4 2 8.5 2Z" fill="#0866FF"/></svg>
-  <h1>Ads Command</h1><p class="muted">Masuk untuk melihat dashboard iklan.</p>
-  <?php if (!empty($loginError)) echo '<p class="err">' . htmlspecialchars($loginError) . '</p>'; ?>
-  <input type="password" name="password" placeholder="Password" autofocus required>
-  <button class="btn primary">Masuk</button>
-</form></body></html>
+<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Masuk — Montera Ads</title><link rel="icon" type="image/png" href="assets/montera-icon.png"><link rel="stylesheet" href="style.css?v=<?= $v ?>"></head>
+<body class="login-body">
+<div class="login rive-login">
+  <img class="login-logo" src="assets/montera-ads.png" alt="Montera Ads" width="116" height="70">
+  <div class="teddy-wrap"><canvas id="teddy" width="340" height="250" aria-label="Animasi beruang login"></canvas></div>
+  <form id="loginForm" method="post" autocomplete="on">
+    <label class="fld-l">Email<input id="lu" name="username" type="email" inputmode="email" autocomplete="username" placeholder="<?= $loginUsers ? 'nama@montera.id' : 'Email (opsional)' ?>" <?= $loginUsers ? 'required' : '' ?>></label>
+    <label class="fld-l">Password
+      <span class="pw-row"><input id="lp" type="password" name="password" autocomplete="current-password" placeholder="Password" required>
+      <button type="button" id="eye" class="eye" aria-label="Lihat password">👁</button></span>
+    </label>
+    <p class="err" id="lerr" <?= empty($loginError) ? 'hidden' : '' ?>><?= htmlspecialchars($loginError ?? '') ?></p>
+    <button class="btn primary login-btn" id="lbtn">Masuk</button>
+  </form>
+</div>
+<div class="login-pop" id="okPop" hidden role="alertdialog" aria-live="assertive">
+  <div class="login-pop-card">
+    <div class="ok-ring"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-16"/></svg></div>
+    <h2>Anda berhasil masuk 🎉</h2>
+    <p id="okUser"></p>
+    <small>Mengalihkan ke dashboard…</small>
+  </div>
+</div>
+<script src="assets/rive/rive.js"></script>
+<script>   // semua file Rive ada di folder assets/rive → tetap jalan walau OFFLINE
+  if (window.rive) { rive.RuntimeLoader.setWasmUrl("assets/rive/rive.wasm"); if (rive.RuntimeLoader.setWasmFallbackUrl) rive.RuntimeLoader.setWasmFallbackUrl(null); }
+</script>
+<script>
+// Animasi beruang = file Rive yang sama dengan aplikasi Flutter (assets/rive/auth_teddy.riv, state machine "Login Machine")
+(() => {
+  const SM = "Login Machine", I = {}, $ = id => document.getElementById(id);
+  const lu = $("lu"), lp = $("lp"), form = $("loginForm"), err = $("lerr"), btn = $("lbtn");
+  const set = (n, v) => { if (I[n]) I[n].value = v; };
+  const fire = k => { const t = I[k + "Trigger"] || I[k]; if (t && t.fire) t.fire(); };
+  const reset = () => { ["isPrivateField", "isPrivateFieldShow", "Hands_up", "isFocus"].forEach(n => set(n, false)); };
+  let r = null;
+  try {
+    r = new rive.Rive({ src: "assets/rive/auth_teddy.riv", canvas: $("teddy"), stateMachines: SM, autoplay: true,
+      onLoad: () => { r.resizeDrawingSurfaceToCanvas(); (r.stateMachineInputs(SM) || []).forEach(i => I[i.name] = i); if (!err.hidden) { reset(); setTimeout(() => fire("fail"), 60); } } });
+    addEventListener("resize", () => r && r.resizeDrawingSurfaceToCanvas());
+  } catch (e) { document.querySelector(".teddy-wrap").hidden = true; }
+  lu.addEventListener("focus", () => set("isFocus", true));
+  lu.addEventListener("blur", () => set("isFocus", false));
+  lu.addEventListener("input", () => { set("numLook", lu.value.length * 1.5); lu.classList.remove("bad"); });
+  lp.addEventListener("input", () => lp.classList.remove("bad"));            // mata mengikuti ketikan
+  lp.addEventListener("focus", () => { set("isPrivateField", true); set("Hands_up", true); });   // tutup mata
+  lp.addEventListener("blur", () => { set("isPrivateField", false); set("Hands_up", lp.value !== ""); });
+  lp.addEventListener("input", () => set("Hands_up", document.activeElement === lp || lp.value !== ""));
+  $("eye").addEventListener("click", () => { const show = lp.type === "password"; lp.type = show ? "text" : "password"; set("isPrivateFieldShow", show); $("eye").textContent = show ? "🙈" : "👁"; lp.focus(); });
+  form.addEventListener("submit", async e => {
+    e.preventDefault(); err.hidden = true; btn.disabled = true; btn.textContent = "Memeriksa…";
+    lu.blur(); lp.blur(); set("isChecking", true);
+    let ok = false, res = {};
+    try { const r0 = await fetch("index.php", { method: "POST", headers: { "X-Login-Ajax": "1" }, body: new FormData(form) }); res = await r0.json(); ok = !!res.ok; } catch { res = { reason: "net" }; }
+    set("isChecking", false); reset(); await new Promise(z => setTimeout(z, 60));
+    if (ok) {
+      fire("success"); btn.textContent = "Berhasil ✓";
+      $("okUser").textContent = res.user ? `Selamat datang, ${res.user}` : "Selamat datang!";
+      setTimeout(() => { $("okPop").hidden = false; }, 350);
+      setTimeout(() => location.replace("index.php"), 2000);
+    } else {
+      fire("fail");
+      const isUser = res.reason === "user";
+      err.textContent = res.reason === "net" ? "Server tidak bisa dihubungi. Pastikan server PHP masih jalan." : isUser ? "Email tidak terdaftar. Cek lagi email kamu." : "Password salah. Coba lagi.";
+      err.hidden = false; btn.disabled = false; btn.textContent = "Masuk";
+      lu.classList.toggle("bad", isUser); lp.classList.toggle("bad", !isUser);
+      (isUser ? lu : lp).focus(); if (!isUser) lp.select();
+      form.classList.remove("shake"); void form.offsetWidth; form.classList.add("shake");
+    }
+  });
+})();
+</script>
+</body></html>
 <?php exit; }
 }
 
@@ -36,7 +120,7 @@ $public = [
     'funnels' => $C['funnels'],
     'accounts' => array_map(fn($a) => ['name' => $a['name'], 'id' => $a['id'], 'group' => $a['group'], 'token' => $a['token']], $C['accounts']),
     'ai' => ['provider' => $C['ai']['provider']],
-    'loginEnabled' => ($C['app_password'] ?? '') !== '',
+    'loginEnabled' => $loginOn,
 ];
 ?>
 <!DOCTYPE html>
@@ -45,19 +129,18 @@ $public = [
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Montera Ads — Campaigns</title>
+  <link rel="icon" type="image/png" href="assets/montera-icon.png">
   <link rel="stylesheet" href="style.css?v=<?= $v ?>">
 </head>
 <body>
   <!-- LEFT RAIL -->
   <aside class="rail">
-    <div class="rail-logo" title="Ads Command">
-      <svg viewBox="0 0 36 24" width="30" height="20"><path d="M8.5 2C4.4 2 1.5 6.9 1.5 12.4c0 5.6 2.3 9.6 6.2 9.6 2.9 0 4.8-2.2 7.4-6.6l1.9-3.2 1.7 2.8c2.9 4.9 5 7 8.1 7 3.8 0 6.1-3.9 6.1-9.4C32.9 6.6 30 2 25.6 2c-2.8 0-4.9 2-7.5 5.8C15.6 4 13.4 2 8.5 2Z" fill="#0866FF"/></svg>
-    </div>
+    <div class="rail-logo" title="Montera Ads"><img src="assets/montera-icon.png" alt="Montera Ads" width="34" height="29"></div>
     <nav class="rail-nav">
       <button class="rail-btn" title="Iklan yang harus dimatikan" data-goto="kill"><svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-6 6v4l-2 3h16l-2-3V9a6 6 0 0 0-6-6Zm-2 15a2 2 0 0 0 4 0"/></svg><span class="rail-badge" id="railBadge" hidden>0</span></button>
       <hr>
       <button class="rail-btn" title="Campaigns" data-goto="all"><svg viewBox="0 0 24 24"><path d="M3 5h18v14H3zM3 10h18M3 15h18M9 5v14"/></svg></button>
-      <button class="rail-btn" title="Montera AI" data-goto="ai"><svg class="mlogo" viewBox="0 0 26 24" aria-hidden="true"><defs><linearGradient id="mlgR" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7b4dff"/><stop offset="1" stop-color="#4b2cc9"/></linearGradient></defs><g fill="url(#mlgR)" transform="skewX(-14) translate(5 0)"><rect x="1" y="11" width="4.2" height="11" rx="2.1"/><rect x="7.4" y="6" width="4.2" height="16" rx="2.1"/><rect x="13.8" y="1.5" width="4.2" height="20.5" rx="2.1"/></g></svg></button>
+      <button class="rail-btn" title="Montera AI" data-goto="ai"><img class="mlogo" src="assets/montera-icon.png" alt="" width="20" height="17"></button>
       <button class="rail-btn" title="Winning ads" data-goto="winning"><svg viewBox="0 0 24 24"><path d="M7 4h10v4a5 5 0 0 1-10 0zM7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4M12 13v4M8 21h8l-1-4H9z"/></svg></button>
       <button class="rail-btn" title="Winning content" data-goto="content"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM10 9l5 3-5 3z"/></svg></button>
       <button class="rail-btn" title="Rekap harian" data-goto="daily"><svg viewBox="0 0 24 24"><path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4M8 14h3M8 17h6"/></svg></button>
@@ -69,7 +152,7 @@ $public = [
 
   <div class="app">
     <header class="head">
-      <h1>Campaigns</h1>
+      <h1 class="brand-title"><img src="assets/montera-ads.png" alt="Montera Ads" width="83" height="50"></h1>
       <div class="scope" id="scopeLabel"></div>
       <button class="src" id="srcBadge"></button>
       <div class="head-right">
@@ -153,10 +236,10 @@ $public = [
   </aside>
 
   <!-- AI ASISTEN -->
-  <button class="chat-fab" id="chatFab" title="Montera AI"><svg class="mlogo" viewBox="0 0 26 24" aria-hidden="true"><g fill="#fff" transform="skewX(-14) translate(5 0)"><rect x="1" y="11" width="4.2" height="11" rx="2.1"/><rect x="7.4" y="6" width="4.2" height="16" rx="2.1"/><rect x="13.8" y="1.5" width="4.2" height="20.5" rx="2.1"/></g></svg> Montera AI</button>
+  <button class="chat-fab" id="chatFab" title="Montera AI"><img class="mlogo" src="assets/montera-icon.png" alt="" width="20" height="17"> Montera AI</button>
   <aside class="chat" id="chat" aria-label="AI asisten iklan">
     <header class="chat-h">
-      <div><b><svg class="mlogo" viewBox="0 0 26 24" aria-hidden="true"><defs><linearGradient id="mlgH" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7b4dff"/><stop offset="1" stop-color="#4b2cc9"/></linearGradient></defs><g fill="url(#mlgH)" transform="skewX(-14) translate(5 0)"><rect x="1" y="11" width="4.2" height="11" rx="2.1"/><rect x="7.4" y="6" width="4.2" height="16" rx="2.1"/><rect x="13.8" y="1.5" width="4.2" height="20.5" rx="2.1"/></g></svg> Montera AI</b><small id="chatScope"></small></div>
+      <div><b><img class="mlogo" src="assets/montera-icon.png" alt="" width="20" height="17"> Montera AI</b><small id="chatScope"></small></div>
       <div class="aimode" title="Mendalam = analisis paling teliti (±20–40 dtk) · Cepat = ±5–10 dtk"><button data-aimode="deep">Mendalam</button><button data-aimode="fast">Cepat</button></div>
       <button class="icon-btn" id="chatReset" title="Hapus riwayat">⟲</button>
       <button class="icon-btn" id="chatClose" title="Tutup">✕</button>
