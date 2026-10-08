@@ -72,9 +72,17 @@ const CONV_FIELDS = "actions,action_values,catalog_segment_actions,catalog_segme
 const CAMP_FILTER = [{ field: "campaign.effective_status", operator: "IN", value: ["ACTIVE", "PAUSED"] }];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-async function api(action, body) {   // semua request ke Meta & AI lewat api.php — token/API key tidak pernah sampai ke browser
+async function refreshCsrf() {   // sesi server diperbarui (mis. setelah update) → ambil token baru tanpa reload halaman
+  try { const r = await fetch(`${CFG.api || "api.php"}?action=csrf`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }); if (!r.ok) return false; const j = await r.json(); if (j.csrf) { CFG.csrf = j.csrf; return true; } } catch {}
+  return false;
+}
+async function api(action, body, _retry) {   // semua request ke Meta & AI lewat api.php — token/API key tidak pernah sampai ke browser
   const r = await fetch(`${CFG.api || "api.php"}?action=${action}`, { method: "POST", headers: { "content-type": "application/json", "x-csrf": CFG.csrf || "" }, body: JSON.stringify(body) });
-  if (r.status === 401) throw new Error("Sesi habis — refresh halaman & login lagi.");
+  if (r.status === 401) {
+    if (!_retry && await refreshCsrf()) return api(action, body, true);
+    setTimeout(() => location.reload(), 1500);
+    throw new Error("Sesi login berakhir — halaman dimuat ulang…");
+  }
   const txt = await r.text();
   try { return JSON.parse(txt); } catch {}
   const i = txt.indexOf('{"'); if (i > 0) { try { return JSON.parse(txt.slice(i)); } catch {} }
@@ -600,7 +608,7 @@ function accCard(sum, sub, m, extra, sel, attr, live, err) {
       <div><small>Cost per purchase</small><b>${rp(m.cpa)}</b></div>
       <div><small>Adds to cart</small><b>${num(m.atc)}</b></div>
     </div>`}
-    <div class="acc-f">${extra}${err ? "" : `<span class="acc-dl" role="button" tabindex="0" title="Download Excel ${esc(sub[0])}" data-export="${sum ? "all" : attr.match(/data-acc="([^"]*)"/)[1]}"><svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"/></svg>Excel</span>`}</div>
+    <div class="acc-f">${extra}${err ? "" : `<span class="acc-dl" role="button" tabindex="0" title="Download Excel ${esc(sub[0])}" data-export="${sum ? "all" : attr.match(/data-acc="([^"]*)"/)[1]}" data-mode="xlsx"><svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"/></svg>Excel</span>`}</div>
   </button>`;
 }
 function renderAccounts() {
@@ -989,7 +997,7 @@ async function applyStatus(ids, on) {
 document.addEventListener("click", ev => {
   const t = ev.target;
   // tombol Excel di kartu akun harus dicek PALING AWAL — kalau tidak, klik ikut dianggap "pilih akun" dan download tidak jalan
-  const ex = t.closest("[data-export]"); if (ex) { ev.preventDefault(); ev.stopPropagation(); doExport(ex.dataset.export, ex); return; }
+  const ex = t.closest("[data-export]"); if (ex) { ev.preventDefault(); ev.stopPropagation(); doExport(ex.dataset.export, ex, ex.dataset.mode); return; }
   const cl = t.closest("[data-claude]"); if (cl) { runClaude(cl.dataset.claude); return; }
   if (t.closest("#clBulkBtn")) { runClaudeBulk(); return; }
   const tog = t.closest("[data-tog]"); if (tog) { const e = BY_ID.get(tog.dataset.tog); applyStatus([e.id], !e.on); return; }
@@ -1078,7 +1086,7 @@ $("#railSync").addEventListener("click", e => manualSync(e.currentTarget));
 $("#overlay").addEventListener("click", closePanel);
 $("#panelClose").addEventListener("click", closePanel);
 document.addEventListener("keydown", e => {
-  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.("[data-export]")) { e.preventDefault(); doExport(e.target.dataset.export, e.target); return; }
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.("[data-export]")) { e.preventDefault(); doExport(e.target.dataset.export, e.target, e.target.dataset.mode); return; }
   if (e.key === "Escape") { closePanel(); closeDP(); toggleChat(false); }
   if (e.key === "/" && !["INPUT", "SELECT"].includes(document.activeElement.tagName)) { e.preventDefault(); $("#q").focus(); }
 });
@@ -1093,19 +1101,38 @@ function loadXLSX() {   // xlsx-js-style = SheetJS + dukungan warna/border/forma
 // ---------- isi Excel ----------
 const MKIND = { spend: "rp", value: "rp", cpatc: "rp", cpvc: "rp", cpc: "rp", cpa: "rp", roas: "dec", freq: "dec", hook: "pct", hold: "pct", ctr: "pct", purch: "int", atc: "int", vc: "int", impr: "int" };
 // naming = segmen terakhir nama campaign/iklan ("8 SEP - BOFU IE - LF - LF 002D" → "LF 002D"); "- Copy 2" diabaikan. "selvia 01" ≠ "selvia 02".
-const namingOf = n => String(n || "").replace(/\s*-\s*copy(\s*\d+)?\s*$/i, "").split(/\s+-\s+/).pop().replace(/\s+/g, " ").trim() || "(tanpa naming)";
+// skor "seberapa winning": yang punya purchase diurutkan dari ROAS & volume tertinggi; tanpa purchase selalu di bawah
+const winScore = m => m.purch ? m.roas * 10 + Math.log10(m.purch + 1) * 8 + m.ctr * 2 : -1e6 - m.spend / 1e6;
+const VRANK = { scale: 0, potential: 1, optimize: 2, watch: 3, kill: 4 };
+// NAMING = nama konten asli. Digabung walau beda versi: B2/B3, SQ_/[SQUARE], Shopee/VATC, "- Copy", (1), dan segmen ID angka diabaikan.
+// "selvia 01" ≠ "selvia 02" (angka konten tetap dibedakan).
+const NAMING_JUNK = /^(copy(\s*\d+)?|\d{5,}|b\d{1,2}|sq|square|\[square\]|\(\d+\)|done\b.*|ori\s*copy.*)$/i;
+function namingOf(n) {
+  const segs = String(n || "").split(/\s+-\s+/).map(x => x.trim()).filter(Boolean);
+  while (segs.length > 1 && NAMING_JUNK.test(segs[segs.length - 1])) segs.pop();
+  let x = segs[segs.length - 1] || "";
+  for (let k = 0; k < 3; k++) x = x
+    .replace(/^sq[_\s-]+/i, "").replace(/\[\s*square\s*\]/ig, "").replace(/\(\s*\d+\s*\)/g, "")
+    .replace(/\b(shopee|vatc|catalog(ue)?|cpas)\b/ig, "")
+    .replace(/[\s_-]+copy(\s*\d+)?$/i, "").replace(/[\s_-]+b\d{1,2}$/i, "")
+    .replace(/\s+/g, " ").trim();
+  return x || "(tanpa naming)";
+}
+const namingKey = n => namingOf(n).toLowerCase().replace(/[\s_.]+/g, "");
 function namingSummary(ents, mOf) {
   const g = new Map();
-  ents.forEach(e => { const label = namingOf(e.name), k = label.toLowerCase(); if (!g.has(k)) g.set(k, { label, list: [] }); g.get(k).list.push(e); });
-  const groups = [...g.values()].map(x => ({ ...x, m: sumM(x.list.map(mOf)), accs: [...new Set(x.list.map(e => e.acc.name))] })).sort((a, b) => b.m.spend - a.m.spend);
+  ents.forEach(e => { const label = namingOf(e.name), k = namingKey(e.name); if (!g.has(k)) g.set(k, { label, list: [] }); g.get(k).list.push(e); });
+  const groups = [...g.values()].map(x => ({ ...x, m: sumM(x.list.map(mOf)), accs: [...new Set(x.list.map(e => e.acc.name))] }))
+    .filter(x => x.m.purch > 0 || x.m.value > 0)   // konten tanpa purchase & tanpa value = tidak menghasilkan → tidak masuk summary
+    .sort((a, b) => winScore(b.m) - winScore(a.m));
   const word = LVL[S.level][0];
   return {
-    title: `Summary per naming · ${groups.length} naming dari ${ents.length} ${word}`,
-    head: ["Naming", `Jumlah ${word}`, "Jumlah akun", "Akun", ...MCOLS.map(c => c.t), `Daftar ${word}`],
-    kinds: ["txt", "int", "int", "txt", ...MCOLS.map(c => MKIND[c.k]), "txt"],
-    rows: groups.map(x => [x.label, x.list.length, x.accs.length, x.accs.join(", "), ...MCOLS.map(c => c.x(x.m)), x.list.map(e => e.name).join("  |  ")]),
-    total: ["TOTAL", ents.length, new Set(ents.map(e => e.acc.name)).size, "", ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
-    dup: groups.map(x => x.list.length > 1)
+    title: `Summary per naming · ${groups.length} konten yang menghasilkan purchase (B2/B3/Shopee/VATC/Copy digabung) · dari ${ents.length} ${word}`,
+    head: ["Peringkat", "Naming", `Jumlah ${word}`, "Jumlah akun", "Akun", ...MCOLS.map(c => c.t), `Daftar ${word}`],
+    kinds: ["int", "txt", "int", "int", "txt", ...MCOLS.map(c => MKIND[c.k]), "txt"],
+    rows: groups.map((x, i) => [i + 1, x.label, x.list.length, x.accs.length, x.accs.join(", "), ...MCOLS.map(c => c.x(x.m)), x.list.map(e => e.name).join("  |  ")]),
+    total: ["", "TOTAL", groups.reduce((t, x) => t + x.list.length, 0), new Set(groups.flatMap(x => x.accs)).size, "", ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
+    dup: groups.map(x => x.list.length > 1), dupCol: 1
   };
 }
 function exportData() {
@@ -1122,18 +1149,23 @@ function exportData() {
   }
   if (S.view === "content") {
     const g = {}; ADS.filter(a => scopeOk(a) && qOk(a)).forEach(a => (g[a.ck] ||= { name: a.name, ads: [] }).ads.push(a));
-    const list = Object.values(g).map(x => ({ ...x, m: sumM(x.ads.map(a => AM.get(a.id))) })).filter(x => x.m.spend > 0).sort((a, b) => b.m.spend - a.m.spend);
+    const list = Object.values(g).map(x => ({ ...x, m: sumM(x.ads.map(a => AM.get(a.id))) })).filter(x => x.m.spend > 0).sort((a, b) => winScore(b.m) - winScore(a.m));
     return { title: `Winning content · ${rangeText()}`, head: ["Konten", "Jumlah akun", "Jumlah iklan", ...mh], kinds: ["txt", "int", "int", ...mk],
       rows: list.map(x => [x.name, new Set(x.ads.map(a => a.acc.id)).size, x.ads.length, ...mv(x.m)]), total: ["TOTAL", "", list.reduce((t, x) => t + x.ads.length, 0), ...mv(sumM(list.map(x => x.m)))] };
   }
-  const ents = visibleRows(), mOf = e => M.get(e.id);
+  const mOf = e => M.get(e.id);
+  const ents = visibleRows().slice().sort((a, b) => {   // dikelompokkan: Naikkan budget → Potensi → Optimasi → Pantau → Matikan, di dalamnya yang paling winning dulu
+    const va = clGet(a.id)?.data?.verdict, vb = clGet(b.id)?.data?.verdict;
+    const ra = VRANK[V[va] ? va : AI.get(a.id).v], rb = VRANK[V[vb] ? vb : AI.get(b.id).v];
+    return ra - rb || winScore(mOf(b)) - winScore(mOf(a));
+  });
   const verdict = e => { const c = clGet(e.id)?.data; return { v: c && V[c.verdict] ? c.verdict : AI.get(e.id).v, why: c?.summary || AI.get(e.id).r[0] }; };
   return {
     title: `${viewName} · ${LVL[S.level][2]}s · ${rangeText()}`,
-    head: ["Akun", LVL[S.level][2] === "Ad" ? "Iklan" : LVL[S.level][2], "Naming", "Delivery", "Rekomendasi", "Budget harian", ...mh, "Alasan rekomendasi", "Campaign", "ID"],
-    kinds: ["txt", "txt", "txt", "txt", "verdict", "rp", ...mk, "txt", "txt", "id"],
-    rows: ents.map(e => { const vd = verdict(e); return [e.acc.name, e.name, namingOf(e.name), delivery(e).t, V[vd.v].label, e.budget ? Math.round(e.budget) : null, ...mv(mOf(e)), vd.why, e.level === "campaign" ? "" : e.camp.name, e.id]; }),
-    total: ["TOTAL", `${ents.length} ${LVL[S.level][1]}`, "", "", "", ents.reduce((t, e) => t + (e.budget || 0), 0) || null, ...mv(sumM(ents.map(mOf))), "", "", ""],
+    head: ["Peringkat", "Akun", LVL[S.level][2] === "Ad" ? "Iklan" : LVL[S.level][2], "Naming", "Delivery", "Rekomendasi", "Budget harian", ...mh, "Alasan rekomendasi", "Campaign", "ID"],
+    kinds: ["int", "txt", "txt", "txt", "txt", "verdict", "rp", ...mk, "txt", "txt", "id"],
+    rows: ents.map((e, i) => { const vd = verdict(e); return [i + 1, e.acc.name, e.name, namingOf(e.name), delivery(e).t, V[vd.v].label, e.budget ? Math.round(e.budget) : null, ...mv(mOf(e)), vd.why, e.level === "campaign" ? "" : e.camp.name, e.id]; }),
+    total: ["", "TOTAL", `${ents.length} ${LVL[S.level][1]}`, "", "", "", ents.reduce((t, e) => t + (e.budget || 0), 0) || null, ...mv(sumM(ents.map(mOf))), "", "", ""],
     summary: namingSummary(ents, mOf)
   };
 }
@@ -1174,7 +1206,7 @@ function buildSheet(XLSX, d, title) {
       let extra = {};
       if (kinds[c] === "verdict" && XS.vcol[row[c]]) extra.font = { bold: true, color: { rgb: XS.vcol[row[c]] } };
       if (c === roasCol && typeof row[c] === "number" && row[d.head.indexOf("Purchases with shared items")] > 0) extra.font = { bold: true, color: { rgb: row[c] >= TARGET.roas ? "1E8E3E" : "D01C39" } };
-      if (d.dup?.[i] && c === 0) extra = { font: { bold: true, color: { rgb: "4B2CC9" } }, fill: { patternType: "solid", fgColor: { rgb: "FFF4D6" } } };   // naming yang muncul > 1x ditandai
+      if (d.dup?.[i] && c === (d.dupCol ?? 0)) extra = { font: { bold: true, color: { rgb: "4B2CC9" } }, fill: { patternType: "solid", fgColor: { rgb: "FFF4D6" } } };   // naming yang muncul > 1x ditandai
       if (kinds[c] === "id") { const a = enc(r, c); if (ws[a]) { ws[a].t = "s"; ws[a].v = String(row[c]); } }
       set(r, c, XS.cell(kinds[c], zebra, extra));
     }
@@ -1191,40 +1223,60 @@ function buildSheet(XLSX, d, title) {
   return ws;
 }
 
-async function doExport(target, btn) {   // target: undefined = sesuai tampilan, "all" = semua akun (+1 sheet per akun), atau ID akun
-  const label = btn?.innerHTML; if (btn) { btn.classList.add("busy"); if (btn.id === "btnExport") btn.textContent = "Menyiapkan Excel…"; }
+function collectExport(target) {   // kumpulkan sheet: sesuai tampilan / 1 akun / semua akun (+ per akun)
+  const out = [];
+  const push = (d, name, withSummary = true) => { out.push({ name, d }); if (withSummary && d.summary && d.summary.rows.length) out.push({ name: `${name.slice(0, 22)} · Naming`, d: d.summary }); };
+  let tag;
+  if (target && target !== "all") { const acc = ACCOUNTS.find(a => a.id === target); push(exportFor(target), acc.name); tag = acc.name; }
+  else if (S.acc && target !== "all") { const acc = ACCOUNTS.find(a => a.id === S.acc); push(exportData(), acc.name); tag = acc.name; }
+  else {
+    const prev = S.acc;
+    push(exportFor(null), "Semua akun");
+    if (S.view !== "check") ACCOUNTS.filter(a => !a.err && a.loaded && (S.brand === "all" || a.brand === S.brand) && (S.pf === "all" || a.pf === S.pf))
+      .forEach(a => { const d = exportFor(a.id); if (d.rows.length) push(d, a.name); });
+    S.acc = prev; compute();
+    tag = S.pf !== "all" ? S.pf : S.brand !== "all" ? S.brand : "semua-akun";
+  }
+  const viewName = { all: "All ads", ai: "Montera AI", winning: "Winning ads", content: "Winning content", daily: "Rekap harian", check: "Cek data" }[S.view] + (["all", "ai", "winning"].includes(S.view) ? " · " + LVL[S.level][2] + "s" : "");
+  const info = { title: "Keterangan export", head: ["Keterangan", "Isi"], rows: [
+    ["Tampilan", viewName], ["Tanggal data", rangeText()], ["Akun", tag], ["Pencarian", S.q || "-"], ["Funnel", S.f.funnel],
+    ["Urutan", "Paling winning di atas (Naikkan budget → Potensi → Optimasi → Pantau → Matikan), lalu ROAS & purchase tertinggi"],
+    ["Naming", "Bagian terakhir nama setelah ' - ' (mis. 'LF 002D'); nama yang persis sama dijumlah di sheet 'Naming'"],
+    ["Diekspor", new Date().toLocaleString("id-ID")]] };
+  const used = new Set();
+  const uniq = n => { let x = String(n).replace(/[\[\]*?\/\\:]/g, "").slice(0, 31) || "Sheet", k = 2; while (used.has(x)) x = x.slice(0, 28) + " " + k++; used.add(x); return x; };
+  out.forEach(o => o.name = uniq(o.name)); out.push({ name: uniq("Info"), d: info });
+  const fileTag = `${String(tag).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${S.view === "daily" ? "rekap-harian" : S.view === "all" ? LVL[S.level][1].replace(" ", "") : S.view}-${S.from}_${S.to}`;
+  return { sheets: out, tag, viewName, fileTag };
+}
+async function doExport(target, btn, mode) {   // mode: "xlsx" (default) atau "gsheet"
+  mode = mode || btn?.dataset?.mode || "xlsx";
+  const label = btn?.innerHTML;
+  let win = null;
+  if (mode === "gsheet") {   // buka tab dulu (sebelum await) supaya tidak diblokir popup blocker
+    win = window.open("", "_blank");
+    if (win) win.document.write('<p style="font:16px system-ui;padding:24px;color:#4B2CC9">⏳ Montera Ads sedang membuat Google Sheet… (bisa 10–60 detik)</p>');
+  }
+  if (btn) { btn.classList.add("busy"); if (btn.id === "btnExport" || btn.id === "btnSheets") btn.textContent = mode === "gsheet" ? "Membuat Google Sheet…" : "Menyiapkan Excel…"; }
   try {
-    const XLSX = await loadXLSX(), wb = XLSX.utils.book_new(), used = new Set();
-    const sheetName = name => { let n = String(name).replace(/[\[\]*?\/\\:]/g, "").slice(0, 31) || "Sheet", k = 2; while (used.has(n)) n = n.slice(0, 28) + " " + k++; used.add(n); return n; };
-    const add = (d, name) => {
-      XLSX.utils.book_append_sheet(wb, buildSheet(XLSX, d, `MONTERA ADS · ${name}`), sheetName(name));
-      if (d.summary && d.summary.rows.length) XLSX.utils.book_append_sheet(wb, buildSheet(XLSX, d.summary, `MONTERA ADS · ${name} · Summary naming`), sheetName(`${name.slice(0, 22)} · Naming`));
-    };
-    let fileTag;
-    if (target && target !== "all") {                       // 1 akun saja (tombol Excel di kartu akun)
-      const acc = ACCOUNTS.find(a => a.id === target);
-      add(exportFor(target), acc.name); fileTag = acc.name;
-    } else if (S.acc && target !== "all") {                 // tombol Export saat 1 akun sedang dipilih
-      const acc = ACCOUNTS.find(a => a.id === S.acc);
-      add(exportData(), acc.name); fileTag = acc.name;
-    } else {                                                // semua akun: sheet gabungan + summary, lalu per akun + summary
-      const prev = S.acc;
-      add(exportFor(null), "Semua akun");
-      if (S.view !== "check") ACCOUNTS.filter(a => !a.err && a.loaded && (S.brand === "all" || a.brand === S.brand) && (S.pf === "all" || a.pf === S.pf))
-        .forEach(a => { const d = exportFor(a.id); if (d.rows.length) add(d, a.name); });
-      S.acc = prev; compute();
-      fileTag = S.pf !== "all" ? S.pf : S.brand !== "all" ? S.brand : "semua-akun";
+    const { sheets, tag, viewName, fileTag } = collectExport(target);
+    if (mode === "gsheet") {
+      const payload = { title: `Montera Ads · ${tag} · ${viewName} · ${rangeText()}`, sheets: sheets.map(({ name, d }) => ({
+        name, title: name === "Info" ? "MONTERA ADS · Info" : `MONTERA ADS · ${name}`, sub: d.title || "", head: d.head, rows: d.rows, total: d.total || null,
+        kinds: d.kinds || d.head.map(() => "txt"), dup: d.dup || null, dupCol: d.dupCol ?? 0,
+        roasCol: d.head.indexOf("Purchase ROAS"), purchCol: d.head.indexOf("Purchases with shared items"), target: TARGET.roas })) };
+      const j = await api("gsheet", payload);
+      if (j.error || !j.url) throw new Error(j.error?.message || "Gagal membuat Google Sheet");
+      if (win) win.location.href = j.url; else window.open(j.url, "_blank");
+    } else {
+      const XLSX = await loadXLSX(), wb = XLSX.utils.book_new();
+      sheets.forEach(({ name, d }) => XLSX.utils.book_append_sheet(wb, buildSheet(XLSX, d, name === "Info" ? "MONTERA ADS · Info" : `MONTERA ADS · ${name}`), name));
+      XLSX.writeFile(wb, `montera-ads-${fileTag}.xlsx`, { cellStyles: true });
     }
-    const info = buildSheet(XLSX, { title: "Keterangan export", head: ["Keterangan", "Isi"], rows: [
-      ["Tampilan", { all: "All ads", ai: "Montera AI", winning: "Winning ads", content: "Winning content", daily: "Rekap harian", check: "Cek data" }[S.view] + (["all", "ai", "winning"].includes(S.view) ? " · " + LVL[S.level][2] + "s" : "")],
-      ["Tanggal data", rangeText()], ["Akun", fileTag], ["Pencarian", S.q || "-"], ["Funnel", S.f.funnel],
-      ["Naming", "Bagian terakhir nama setelah tanda ' - ' (mis. 'LF 002D'). Nama yang persis sama dijumlah di sheet 'Naming'."],
-      ["Total", "Baris TOTAL = jumlah semua baris di sheet itu"], ["Diekspor", new Date().toLocaleString("id-ID")]] }, "MONTERA ADS · Info");
-    XLSX.utils.book_append_sheet(wb, info, "Info");
-    XLSX.writeFile(wb, `montera-ads-${String(fileTag).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${S.view === "daily" ? "rekap-harian" : S.view === "all" ? LVL[S.level][1].replace(" ", "") : S.view}-${S.from}_${S.to}.xlsx`, { cellStyles: true });
-  } catch (err) { alert(err.message); }
+  } catch (err) { if (win) win.close(); alert(err.message); }
   if (btn) { btn.classList.remove("busy"); btn.innerHTML = label; }
 }
+$("#btnSheets")?.addEventListener("click", e => doExport(undefined, e.currentTarget, "gsheet"));
 $("#btnExport").addEventListener("click", e => doExport(undefined, e.currentTarget));
 
 
@@ -1310,21 +1362,41 @@ function renderChat() {
 const THINK_STEPS = () => [`Membaca ${scopedAccounts().filter(a => a.loaded).length} akun & ${CAMPAIGNS.filter(c => adsIn(c).length && M.get(c.id).spend > 0).length} campaign aktif`, "Menghitung ROAS, CPP, cost per ATC per funnel", "Membedah hook rate & hold rate tiap iklan", "Mencari iklan yang bikin boncos", "Mencari kandidat winning untuk di-scale", "Menyusun rencana budget"];
 let thinkT0 = 0, thinkTimer = null;
 function thinkingHTML() {
+  if (CHAT.casual) return `<div class="msg bot thinking"><div class="th-h">${MLOGO}<b>${AI_NAME} sedang mengetik</b><span class="typing"><i></i><i></i><i></i></span></div></div>`;
   const steps = THINK_STEPS(), sec = (Date.now() - thinkT0) / 1000, cur = Math.min(steps.length - 1, Math.floor(sec / 2.5));
   return `<div class="msg bot thinking"><div class="th-h">${MLOGO}<b>${AI_NAME} sedang berpikir</b><span class="muted sm">${Math.floor(sec)} dtk</span></div>
     <ol class="th-steps">${steps.map((t, i) => `<li class="${i < cur ? "done" : i === cur ? "now" : ""}">${i < cur ? "✓" : i === cur ? "<span class='spin-dot'></span>" : "•"} ${esc(t)}</li>`).join("")}</ol></div>`;
 }
 const saveChat = () => store.set("ac_chat", CHAT.msgs.slice(-30));
+// Analisis data hanya kalau pertanyaannya soal iklan; sapaan/obrolan biasa dijawab santai & cepat tanpa membaca data
+const AD_RE = /(iklan|\bads?\b|campaign|kampanye|ad ?set|roas|\bcpp\b|\bcpa\b|\bctr\b|\bcpc\b|\bcpm\b|hook|hold rate|spend|budget|boncos|rugi|scale|winning|konten|creative|kreatif|funnel|tofu|mofu|bofu|shopee|purchase|pembelian|\batc\b|add to cart|checkout|akun|\bhk ?\d|prepare|skinlyfe|selow|glowing|matikan|nyalakan|pause|naikkan|turunkan|performa|omzet|conversion|frequency|impres|reach|audience|\bmeta\b|facebook|instagram|rekap|analis|naming|\bvc\b|content view|hari ini|kemarin|minggu ini|bulan ini)/i;
+const CASUAL_SYS = () => `Kamu ${AI_NAME}, asisten AI tim iklan Montera yang santai dan ramah, seperti teman ngobrol. Jawab singkat, natural, bahasa Indonesia santai (boleh gaul sedikit), sesuai yang ditanya saja. JANGAN membahas data iklan, angka, atau analisis kecuali user menanyakannya. Kalau cuma disapa ("p", "halo"), balas sapaan singkat 1 kalimat dan tawarkan bantuan. Pertanyaan umum (bukan soal iklan) jawab seperti AI biasa.
+Balas HANYA JSON valid: {"reply":"jawaban (markdown ringan boleh)","actions":[]}`;
+const isAdTalk = text => {
+  if (AD_RE.test(text)) return true;
+  const prev = [...CHAT.msgs].reverse().find(m => m.role === "assistant");
+  const words = text.trim().split(/\s+/).length;
+  return !!(prev && prev._ad && words >= 3 && /(itu|yang|nya|kenapa|gimana|bagaimana|terus|lalu|kalau|yg)\b/i.test(text));   // pertanyaan lanjutan dari analisis sebelumnya
+};
 async function sendChat(text) {
   text = text.trim(); if (!text || CHAT.busy) return;
-  if (!S.lastSync) { alert("Tunggu data Meta selesai dimuat dulu."); return; }
-  CHAT.msgs.push({ role: "user", content: text }); CHAT.busy = true; thinkT0 = Date.now(); renderChat();
+  const adTalk = isAdTalk(text);
+  if (adTalk && !S.lastSync) { alert("Tunggu data Meta selesai dimuat dulu."); return; }
+  CHAT.msgs.push({ role: "user", content: text }); CHAT.busy = true; CHAT.casual = !adTalk; thinkT0 = Date.now(); renderChat();
   clearInterval(thinkTimer); thinkTimer = setInterval(() => { const el = $("#chatMsgs .thinking"); if (el && CHAT.busy) el.outerHTML = thinkingHTML(); }, 600);
   try {
+    if (!adTalk) {   // ngobrol biasa: tanpa data, model cepat
+      const hist = CHAT.msgs.slice(-8).map(m => ({ role: m.role, content: m.role === "assistant" ? JSON.stringify({ reply: m.content, actions: [] }) : m.content }));
+      const j = await api("ai", { system: CASUAL_SYS(), messages: hist, mode: "fast" });
+      if (j.error) throw new Error(j.error.message || j.error);
+      let reply; try { reply = parseJSONText(j.text).reply; } catch { reply = String(j.text || "").trim(); }
+      CHAT.msgs.push({ role: "assistant", content: String(reply || "Hai! Ada yang bisa aku bantu?"), actions: [] });
+      CHAT.busy = false; clearInterval(thinkTimer); saveChat(); renderChat(); return;
+    }
     const scope = `[Filter sekarang: ${S.acc ? ACCOUNTS.find(a => a.id === S.acc).name : "semua akun" + (S.pf !== "all" ? " " + S.pf : "")}${S.q ? `, pencarian "${S.q}"` : ""}${S.f.funnel !== "all" ? `, funnel ${S.f.funnel}` : ""} · ${periodLabel()} ${rangeText()}]`;
     const hist = CHAT.msgs.slice(-8).map((m, i, arr) => ({ role: m.role, content: m.role === "assistant" ? JSON.stringify({ reply: m.content, actions: (m.actions || []).map(({ status, err, ...a }) => a) }) : (i === arr.length - 1 ? `${scope}\n${m.content}` : m.content) }));
     const r = await askAI(CHAT_SYS(), hist);
-    CHAT.msgs.push({ role: "assistant", content: String(r.reply || "(tidak ada jawaban)"), actions: Array.isArray(r.actions) ? r.actions.filter(a => a && a.id && a.type) : [] });
+    CHAT.msgs.push({ role: "assistant", _ad: true, content: String(r.reply || "(tidak ada jawaban)"), actions: Array.isArray(r.actions) ? r.actions.filter(a => a && a.id && a.type) : [] });
   } catch (err) { CHAT.msgs.push({ role: "assistant", content: `**Gagal:** ${err.message}`, actions: [] }); }
   CHAT.busy = false; clearInterval(thinkTimer); saveChat(); renderChat();
 }

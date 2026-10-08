@@ -26,6 +26,10 @@ function fail(string $msg, int $code = 400): void { out(['error' => ['message' =
 // --- keamanan: login + CSRF ---
 if (empty($_SESSION['ac_ok']) && ($ru = ma_remember_check($C)) !== null) { $_SESSION['ac_ok'] = true; $_SESSION['ac_user'] = $ru; }   // login tahan lama
 if ((($C['app_password'] ?? '') !== '' || !empty($C['login_users'])) && empty($_SESSION['ac_ok'])) fail('Belum login', 401);
+if (($_GET['action'] ?? '') === 'csrf') {   // token CSRF baru untuk halaman yang sesinya diperbarui (user tetap login lewat cookie "ingat saya")
+    if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(16));
+    out(['csrf' => $_SESSION['csrf']]);
+}
 if (!hash_equals((string)($_SESSION['csrf'] ?? ''), (string)($_SERVER['HTTP_X_CSRF'] ?? ''))) fail('Sesi tidak valid', 401);
 session_write_close();   // lepas kunci session supaya request paralel tidak antre
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail('Method tidak diizinkan', 405);
@@ -148,6 +152,34 @@ if ($action === 'post') {
     @mkdir(__DIR__ . '/logs', 0750, true);
     @file_put_contents(__DIR__ . '/logs/actions.log', json_encode(['t' => date('c'), 'ip' => $_SERVER['REMOTE_ADDR'] ?? '', 'acc' => $in['acc'], 'id' => $id, 'set' => $f, 'meta' => json_decode($txt, true)]) . "\n", FILE_APPEND | LOCK_EX);
     out(json_decode($txt, true) ?: ['error' => ['message' => "Respon Meta tidak valid (HTTP $st)"]]);
+}
+
+/* ---------- 2b. Export ke Google Sheets (lewat Google Apps Script Web App milik sendiri) ---------- */
+if ($action === 'gsheet') {
+    $G = $C['google_sheets'] ?? [];
+    if (empty($G['webapp_url']) || empty($G['secret'])) fail('Google Sheets belum diatur: isi google_sheets → webapp_url & secret di config.php');
+    set_time_limit(360);
+    $payload = json_encode([
+        'secret'   => $G['secret'],
+        'title'    => (string)($in['title'] ?? 'Montera Ads'),
+        'sheets'   => $in['sheets'] ?? [],
+        'share'    => $G['share_with'] ?? [],
+        'linkView' => !empty($G['link_view']),
+        'folderId' => (string)($G['folder_id'] ?? ''),
+    ], JSON_UNESCAPED_UNICODE);
+    $ch = curl_init($G['webapp_url']);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_FOLLOWLOCATION => true,          // Apps Script membalas 302 → ikuti (POST otomatis jadi GET, memang begitu caranya)
+        CURLOPT_TIMEOUT => 340, CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+    ]);
+    $txt = curl_exec($ch); $st = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE); $err = curl_error($ch);
+    if ($err) fail("Koneksi ke Google gagal: $err", 502);
+    $j = json_decode((string)$txt, true);
+    if (!is_array($j)) fail("Respon Google tidak valid (HTTP $st). Cek deploy Web App: Execute as = Me, Who has access = Anyone.", 502);
+    if (!empty($j['error'])) fail('Google Sheets: ' . $j['error']);
+    out(['url' => (string)($j['url'] ?? '')]);
 }
 
 /* ---------- 3. AI analis ---------- */
