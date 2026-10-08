@@ -109,10 +109,12 @@ async function gget(path, params, acc) {
 const getAct = (arr, types) => { for (const t of types) { const f = (arr || []).find(a => a.action_type === t); if (f) return parseFloat(f.value) || 0; } return 0; };
 function convOf(r) {  // sama persis dengan script sheet CPAS
   return {
-    purch: getAct(r.catalog_segment_actions, ["omni_purchase", "purchase"]) || getAct(r.actions, ["omni_purchase", "onsite_conversion.purchase", "purchase"]),
-    value: getAct(r.catalog_segment_value, ["omni_purchase", "purchase"]) || getAct(r.action_values, ["omni_purchase", "onsite_conversion.purchase", "purchase"]),
-    atc: getAct(r.catalog_segment_actions, ["omni_add_to_cart", "add_to_cart"]) || getAct(r.actions, ["omni_add_to_cart", "add_to_cart"]),
-    vc: getAct(r.catalog_segment_actions, ["omni_view_content", "view_content"]) || getAct(r.actions, ["omni_view_content", "view_content"])
+    // PERSIS kolom Ads Manager "… with shared items" (catalog segment). Tidak lagi ditambah dari "actions",
+    // karena itu membuat purchase/value sedikit lebih besar dari Ads Manager di campaign yang tidak punya catalog segment.
+    purch: getAct(r.catalog_segment_actions, ["omni_purchase", "purchase"]),
+    value: getAct(r.catalog_segment_value, ["omni_purchase", "purchase"]),
+    atc: getAct(r.catalog_segment_actions, ["omni_add_to_cart", "add_to_cart"]),
+    vc: getAct(r.catalog_segment_actions, ["omni_view_content", "view_content"])
   };
 }
 // [0 spend, 1 impr, 2 link clicks, 3 ATC, 4 purchase, 5 value, 6 freq(iklan), 7 content view, 8 video 3 detik, 9 thruplay]
@@ -146,19 +148,19 @@ function buildStructure(acc) {
   const campObj = new Map(camps.map(o => [o.id, o])), setObj = new Map(sets.map(o => [o.id, o])), adObj = new Map(ads.map(o => [o.id, o]));
   acc.campaigns = []; acc.ads = [];
   const mkCamp = (id, name) => {
-    if (cMap.has(id)) return cMap.get(id);
+    if (cMap.has(id)) { const c = cMap.get(id); if (c.name === id && name) c.name = name; return c; }   // nama sempat berupa ID → ganti dgn nama asli dari insights
     const o = campObj.get(id), [b, bt] = bud(o);
     const c = { id, level: "campaign", acc, name: o?.name || name || id, budget: b, budgetType: bt, start: (o?.start_time || "").slice(0, 10) || null, on: o?.status === "ACTIVE", eff: o?.effective_status, adsets: [], ads: [], days: {} };
     cMap.set(id, c); acc.campaigns.push(c); return c;
   };
   const mkSet = (id, name, campId, campName) => {
-    if (sMap.has(id)) return sMap.get(id);
+    if (sMap.has(id)) { const st = sMap.get(id); if (st.name === id && name) st.name = name; if (campName) mkCamp(st.camp.id, campName); return st; }
     const o = setObj.get(id), camp = mkCamp(o?.campaign_id || campId, campName), [b, bt] = bud(o);
     const s = { id, level: "adset", acc, camp, name: o?.name || name || id, budget: b, budgetType: bt, start: (o?.start_time || "").slice(0, 10) || camp.start, on: o?.status === "ACTIVE", ads: [] };
     camp.adsets.push(s); sMap.set(id, s); return s;
   };
   const mkAd = (id, name, setId, setName, campId, campName) => {
-    if (aMap.has(id)) return aMap.get(id);
+    if (aMap.has(id)) { const ad = aMap.get(id); if (ad.name === id && name) ad.name = name; if (setName || campName) mkSet(ad.adset.id, setName, ad.camp.id, campName); return ad; }
     const o = adObj.get(id), adset = mkSet(o?.adset_id || setId, setName, o?.campaign_id || campId, campName);
     const cr = o?.creative || {};
     const text = cr.body || cr.title || "";
@@ -1119,9 +1121,20 @@ function namingOf(n) {
   return x || "(tanpa naming)";
 }
 const namingKey = n => namingOf(n).toLowerCase().replace(/[\s_.]+/g, "");
+const badNaming = x => x === "(tanpa naming)" || /^[\d\s]{6,}$/.test(x);
+function namingOfEnt(e) {   // naming untuk campaign / ad set / iklan
+  let x = namingOf(e.name);
+  if (!badNaming(x)) return x;
+  if (e.level !== "ad") {   // nama campaign berupa ID → ambil dari nama iklan dengan spend terbesar di dalamnya
+    const ads = adsIn(e).slice().sort((a, b) => (AM.get(b.id)?.spend || 0) - (AM.get(a.id)?.spend || 0));
+    for (const a of ads) { const y = namingOf(a.name); if (!badNaming(y)) return y; }
+  } else if (e.camp) { const y = namingOf(e.camp.name); if (!badNaming(y)) return y; }
+  return x;
+}
+const namingKeyEnt = e => namingOfEnt(e).toLowerCase().replace(/[\s_.]+/g, "");
 function namingSummary(ents, mOf) {
   const g = new Map();
-  ents.forEach(e => { const label = namingOf(e.name), k = namingKey(e.name); if (!g.has(k)) g.set(k, { label, list: [] }); g.get(k).list.push(e); });
+  ents.forEach(e => { const label = namingOfEnt(e), k = namingKeyEnt(e); if (!g.has(k)) g.set(k, { label, list: [] }); g.get(k).list.push(e); });
   const groups = [...g.values()].map(x => ({ ...x, m: sumM(x.list.map(mOf)), accs: [...new Set(x.list.map(e => e.acc.name))] }))
     .filter(x => x.m.purch > 0 || x.m.value > 0)   // konten tanpa purchase & tanpa value = tidak menghasilkan → tidak masuk summary
     .sort((a, b) => winScore(b.m) - winScore(a.m));
@@ -1164,7 +1177,7 @@ function exportData() {
     title: `${viewName} · ${LVL[S.level][2]}s · ${rangeText()}`,
     head: ["Peringkat", "Akun", LVL[S.level][2] === "Ad" ? "Iklan" : LVL[S.level][2], "Naming", "Delivery", "Rekomendasi", "Budget harian", ...mh, "Alasan rekomendasi", "Campaign", "ID"],
     kinds: ["int", "txt", "txt", "txt", "txt", "verdict", "rp", ...mk, "txt", "txt", "id"],
-    rows: ents.map((e, i) => { const vd = verdict(e); return [i + 1, e.acc.name, e.name, namingOf(e.name), delivery(e).t, V[vd.v].label, e.budget ? Math.round(e.budget) : null, ...mv(mOf(e)), vd.why, e.level === "campaign" ? "" : e.camp.name, e.id]; }),
+    rows: ents.map((e, i) => { const vd = verdict(e); return [i + 1, e.acc.name, e.name, namingOfEnt(e), delivery(e).t, V[vd.v].label, e.budget ? Math.round(e.budget) : null, ...mv(mOf(e)), vd.why, e.level === "campaign" ? "" : e.camp.name, e.id]; }),
     total: ["", "TOTAL", `${ents.length} ${LVL[S.level][1]}`, "", "", "", ents.reduce((t, e) => t + (e.budget || 0), 0) || null, ...mv(sumM(ents.map(mOf))), "", "", ""],
     summary: namingSummary(ents, mOf)
   };
