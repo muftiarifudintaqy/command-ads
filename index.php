@@ -1,7 +1,8 @@
 <?php
 /* ADS COMMAND — halaman utama */
 declare(strict_types=1);
-session_start();
+require __DIR__ . '/auth.php';
+ma_session_start();
 $C = require __DIR__ . (is_file(__DIR__ . '/config.php') ? '/config.php' : '/config.example.php');   // laptop: config.php · server: env var
 if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(16));
 $v = @filemtime(__DIR__ . '/app.js') . @filemtime(__DIR__ . '/style.css');   // versi file (anti-cache)
@@ -10,7 +11,8 @@ $v = @filemtime(__DIR__ . '/app.js') . @filemtime(__DIR__ . '/style.css');   // 
 $loginUsers = $C['login_users'] ?? [];
 $loginOn = ($C['app_password'] ?? '') !== '' || !empty($loginUsers);
 if ($loginOn) {
-    if (isset($_GET['logout'])) { session_destroy(); header('Location: index.php'); exit; }
+    if (isset($_GET['logout'])) { ma_remember_clear(); session_destroy(); header('Location: index.php'); exit; }
+    if (empty($_SESSION['ac_ok']) && ($ru = ma_remember_check($C)) !== null) { $_SESSION['ac_ok'] = true; $_SESSION['ac_user'] = $ru; }   // masih ingat → langsung masuk
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['password'])) {
         $u = trim((string)($_POST['username'] ?? ''));
         $p = (string)$_POST['password'];
@@ -25,7 +27,7 @@ if ($loginOn) {
             $ok = hash_equals((string)$C['app_password'], $p);
             if (!$ok) $reason = 'password';
         }
-        if ($ok) { session_regenerate_id(true); $_SESSION['ac_ok'] = true; $_SESSION['ac_user'] = $u !== '' ? strtolower($u) : 'admin'; }
+        if ($ok) { session_regenerate_id(true); $_SESSION['ac_ok'] = true; $_SESSION['ac_user'] = $u !== '' ? strtolower($u) : 'admin'; ma_remember_set($C, $u !== '' ? $u : 'admin'); }
         else usleep(400000);   // perlambat tebak-tebakan password
         if (!empty($_SERVER['HTTP_X_LOGIN_AJAX'])) { header('Content-Type: application/json'); echo json_encode(['ok' => $ok, 'reason' => $reason, 'user' => $ok ? ($_SESSION['ac_user'] ?? '') : '']); exit; }
         if ($ok) { header('Location: index.php'); exit; }

@@ -9,7 +9,8 @@ ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
 ob_start();
-session_start();
+require __DIR__ . '/auth.php';
+ma_session_start();
 $C = require __DIR__ . (is_file(__DIR__ . '/config.php') ? '/config.php' : '/config.example.php');   // laptop: config.php · server: env var
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -23,6 +24,7 @@ function out(array $x, int $code = 200): void {
 function fail(string $msg, int $code = 400): void { out(['error' => ['message' => $msg]], $code); }
 
 // --- keamanan: login + CSRF ---
+if (empty($_SESSION['ac_ok']) && ($ru = ma_remember_check($C)) !== null) { $_SESSION['ac_ok'] = true; $_SESSION['ac_user'] = $ru; }   // login tahan lama
 if ((($C['app_password'] ?? '') !== '' || !empty($C['login_users'])) && empty($_SESSION['ac_ok'])) fail('Belum login', 401);
 if (!hash_equals((string)($_SESSION['csrf'] ?? ''), (string)($_SERVER['HTTP_X_CSRF'] ?? ''))) fail('Sesi tidak valid', 401);
 session_write_close();   // lepas kunci session supaya request paralel tidak antre
