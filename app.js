@@ -1111,7 +1111,8 @@ const VRANK = { scale: 0, potential: 1, optimize: 2, watch: 3, kill: 4 };
 const NAMING_JUNK = /^(copy(\s*\d+)?|\d{5,}|b\d{1,2}|sq|square|\[square\]|\(\d+\)|done\b.*|ori\s*copy.*)$/i;
 function namingOf(n) {
   const segs = String(n || "").split(/\s+-\s+/).map(x => x.trim()).filter(Boolean);
-  while (segs.length > 1 && NAMING_JUNK.test(segs[segs.length - 1])) segs.pop();
+  // buang segmen akhir yang bukan nama konten: Copy, ID angka, B2, (1), done…, dan kode kecil seperti "- nt" (huruf kecil ≤3)
+  while (segs.length > 1 && (NAMING_JUNK.test(segs[segs.length - 1]) || /^[a-z]{1,3}$/.test(segs[segs.length - 1]))) segs.pop();
   let x = segs[segs.length - 1] || "";
   for (let k = 0; k < 3; k++) x = x
     .replace(/^sq[_\s-]+/i, "").replace(/\[\s*square\s*\]/ig, "").replace(/\(\s*\d+\s*\)/g, "")
