@@ -10,7 +10,7 @@ ini_set('log_errors', '1');
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
 ob_start();
 session_start();
-$C = require __DIR__ . '/config.php';
+$C = require __DIR__ . (is_file(__DIR__ . '/config.php') ? '/config.php' : '/config.example.php');   // laptop: config.php · server: env var
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
@@ -41,6 +41,7 @@ function http_req(string $method, string $url, ?string $body = null, array $head
         CURLOPT_CONNECTTIMEOUT => 10,
         CURLOPT_HTTPHEADER     => $headers,
         CURLOPT_ENCODING       => '',      // terima gzip → lebih cepat
+        CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,   // server VPS: IPv6 sering lambat/timeout → paksa IPv4
     ]);
     if ($body !== null) curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
     $txt = curl_exec($ch);
@@ -60,7 +61,7 @@ function acc_token(array $C, string $accId): ?string {
 if ($action === 'graph') {
     $tok  = acc_token($C, (string)($in['acc'] ?? ''));
     $path = (string)($in['path'] ?? '');
-    if (!$tok) fail('Akun tidak ada di config.php');
+    if (!$tok) fail('Token Meta kosong untuk akun ini — isi di config.php atau env var META_TOKEN_PREPARE / META_TOKEN_SKINLYFE');
     if (!preg_match('#^[A-Za-z0-9_/]+$#', $path)) fail('Path tidak valid');
     $q = [];
     foreach (($in['params'] ?? []) as $k => $v) $q[$k] = is_array($v) ? json_encode($v) : (string)$v;
@@ -85,7 +86,8 @@ if ($action === 'multi') {
     foreach (array_values($reqs) as $i => $r) {
         $tok = acc_token($C, (string)($r['acc'] ?? ''));
         $path = (string)($r['path'] ?? '');
-        if (!$tok || !preg_match('#^[A-Za-z0-9_/]+$#', $path)) { $results[$i] = ['error' => ['message' => 'Akun/path tidak valid']]; continue; }
+        if (!$tok) { $results[$i] = ['error' => ['message' => 'Token Meta kosong untuk akun ini — isi di config.php atau env var META_TOKEN_PREPARE / META_TOKEN_SKINLYFE']]; continue; }
+        if (!preg_match('#^[A-Za-z0-9_/]+$#', $path)) { $results[$i] = ['error' => ['message' => 'Path tidak valid']]; continue; }
         $q = [];
         foreach (($r['params'] ?? []) as $k => $v) $q[$k] = is_array($v) ? json_encode($v) : (string)$v;
         $q['access_token'] = $tok;
@@ -99,7 +101,7 @@ if ($action === 'multi') {
         while ($queue && count($active) < $MAX) {
             [$i, $url] = array_shift($queue);
             $ch = curl_init($url);
-            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 90, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_ENCODING => '']);
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 90, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_ENCODING => '', CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4]);
             curl_multi_add_handle($mh, $ch);
             $active[spl_object_id($ch)] = $i;
         }

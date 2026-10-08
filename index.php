@@ -2,7 +2,7 @@
 /* ADS COMMAND — halaman utama */
 declare(strict_types=1);
 session_start();
-$C = require __DIR__ . '/config.php';
+$C = require __DIR__ . (is_file(__DIR__ . '/config.php') ? '/config.php' : '/config.example.php');   // laptop: config.php · server: env var
 if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(16));
 $v = @filemtime(__DIR__ . '/app.js') . @filemtime(__DIR__ . '/style.css');   // versi file (anti-cache)
 
