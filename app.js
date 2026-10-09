@@ -162,11 +162,11 @@ function buildStructure(acc) {
     camp.adsets.push(s); sMap.set(id, s); return s;
   };
   const mkAd = (id, name, setId, setName, campId, campName) => {
-    if (aMap.has(id)) { const ad = aMap.get(id); if (ad.name === id && name) { ad.name = name; ad.ck = namingKey(name); } if (setName || campName) mkSet(ad.adset.id, setName, ad.camp.id, campName); return ad; }
+    if (aMap.has(id)) { const ad = aMap.get(id); if (ad.name === id && name) { ad.name = name; ad.ck = normName(name); } if (setName || campName) mkSet(ad.adset.id, setName, ad.camp.id, campName); return ad; }
     const o = adObj.get(id), adset = mkSet(o?.adset_id || setId, setName, o?.campaign_id || campId, campName);
     const cr = o?.creative || {};
     const text = cr.body || cr.title || "";
-    const ad = { id, level: "ad", acc, camp: adset.camp, adset, name: o?.name || name || id, ck: namingKey(o?.name || name || id),
+    const ad = { id, level: "ad", acc, camp: adset.camp, adset, name: o?.name || name || id, ck: normName(o?.name || name),
       desc: text ? text.replace(/\s+/g, " ").slice(0, 400) : "(Tidak ada primary text)", thumb: cr.thumbnail_url || null,
       start: (o?.created_time || "").slice(0, 10) || adset.start, on: o?.status === "ACTIVE", eff: o?.effective_status || null, days: {}, freqR: null };
     adset.ads.push(ad); adset.camp.ads.push(ad); aMap.set(id, ad); acc.ads.push(ad); return ad;
@@ -790,13 +790,13 @@ function renderTable() {
 
 function renderContent() {
   const ads = ADS.filter(a => scopeOk(a) && qOk(a)), groups = {};
-  ads.forEach(a => (groups[a.ck] ||= { name: namingOf(a.name), ads: [] }).ads.push(a));
+  ads.forEach(a => (groups[a.ck] ||= { name: a.name, ads: [] }).ads.push(a));
   const rows = Object.values(groups).map(g => ({ ...g, m: sumM(g.ads.map(a => AM.get(a.id))), accs: [...new Set(g.ads.map(a => a.acc))] }))
     .filter(g => g.m.spend > 0).sort((x, y) => (y.m.purch ? y.m.roas : -1) - (x.m.purch ? x.m.roas : -1) || y.m.spend - x.m.spend);
   $("#thead").innerHTML = `<tr><th class="c-chk"></th><th class="c-tog">#</th><th class="c-name">Konten (nama iklan)</th><th>Dipakai di</th><th>Rekomendasi per iklan</th>${mhead(false)}</tr>`;
   $("#tbody").innerHTML = rows.length ? rows.map((g, i) => {
     const cnt = k => g.ads.filter(a => AI.get(a.id).v === k).length;
-    return `<tr data-content="${esc(g.name)}">
+    return `<tr data-content="${esc(g.ads[0].ck)}">
       <td class="c-chk"></td><td class="c-tog"><span class="rank">${i + 1}</span></td>
       <td class="c-name"><div class="nm">${thumb(g.ads[0])}<div><a>${esc(g.name)}</a><div class="desc">${esc(g.ads[0].desc)}</div></div></div></td>
       <td><b>${g.accs.length} akun</b> · ${g.ads.length} iklan<div class="chips sm">${g.accs.slice(0, 4).map(a => `<span class="chip">${esc(a.name)}</span>`).join("")}${g.accs.length > 4 ? `<span class="chip">+${g.accs.length - 4}</span>` : ""}</div></td>
@@ -1111,11 +1111,14 @@ const VRANK = { scale: 0, potential: 1, optimize: 2, watch: 3, kill: 4 };
 // NAMING = nama konten asli. Digabung walau beda versi: B2/B3, SQ_/[SQUARE], Shopee/VATC, "- Copy", (1), dan segmen ID angka diabaikan.
 // "selvia 01" ≠ "selvia 02" (angka konten tetap dibedakan).
 const NAMING_JUNK = /^(copy(\s*\d+)?|\d{5,}|b\d{1,2}|sq|square|\[square\]|\(\d+\)|done\b.*|ori\s*copy.*)$/i;
-function namingOf(n) {
+function namingOf(n, whole) {   // whole=true → nama IKLAN: seluruh nama (tanpa akhiran sampah); false → nama CAMPAIGN: segmen terakhir
   const segs = String(n || "").split(/\s+-\s+/).map(x => x.trim()).filter(Boolean);
   // buang segmen akhir yang bukan nama konten: Copy, ID angka, B2, (1), done…, dan kode kecil seperti "- nt" (huruf kecil ≤3)
-  while (segs.length > 1 && (NAMING_JUNK.test(segs[segs.length - 1]) || /^[a-z]{1,3}$/.test(segs[segs.length - 1]))) segs.pop();
-  let x = segs[segs.length - 1] || "";
+  // segmen akhir yang BUKAN nama konten dibuang: funnel/placement (tofu, mofu, bofu, shopee, vatc, ig, fb, reels, story, feed, sq),
+  // kode huruf kecil pendek ("nt", "new"), Copy, ID angka, B2, (1), done…
+  const TAIL_JUNK = /^(tofu|mofu|bofu|shopee|vatc|cpas|catalog(ue)?|ig|fb|reels?|story|stories|feed|sq|square|new|baru|rev(isi)?|test|tes)$/i;
+  while (segs.length > 1 && (NAMING_JUNK.test(segs[segs.length - 1]) || TAIL_JUNK.test(segs[segs.length - 1]) || /^[a-z]{1,4}$/.test(segs[segs.length - 1]))) segs.pop();
+  let x = (whole ? segs.join(" - ") : segs[segs.length - 1]) || "";
   for (let k = 0; k < 3; k++) x = x
     .replace(/^sq[_\s-]+/i, "").replace(/\[\s*square\s*\]/ig, "").replace(/\(\s*\d+\s*\)/g, "")
     .replace(/\b(shopee|vatc|catalog(ue)?|cpas)\b/ig, "")
@@ -1126,11 +1129,11 @@ function namingOf(n) {
 const namingKey = n => namingOf(n).toLowerCase().replace(/[\s_.]+/g, "");
 const badNaming = x => x === "(tanpa naming)" || /^[\d\s]{6,}$/.test(x);
 function namingOfEnt(e) {   // naming untuk campaign / ad set / iklan
-  let x = namingOf(e.name);
+  let x = namingOf(e.name, e.level === "ad");
   if (!badNaming(x)) return x;
   if (e.level !== "ad") {   // nama campaign berupa ID → ambil dari nama iklan dengan spend terbesar di dalamnya
     const ads = adsIn(e).slice().sort((a, b) => (AM.get(b.id)?.spend || 0) - (AM.get(a.id)?.spend || 0));
-    for (const a of ads) { const y = namingOf(a.name); if (!badNaming(y)) return y; }
+    for (const a of ads) { const y = namingOf(a.name, true); if (!badNaming(y)) return y; }
   } else if (e.camp) { const y = namingOf(e.camp.name); if (!badNaming(y)) return y; }
   return x;
 }
@@ -1145,15 +1148,16 @@ function namingSummary(ents) {
     if (!g.has(k)) g.set(k, { label, list: [] }); g.get(k).list.push(a);
   });
   const groups = [...g.values()].map(x => ({ ...x, m: sumM(x.list.map(a => AM.get(a.id))),
-      camps: [...new Set(x.list.map(a => a.camp))], accs: [...new Set(x.list.map(a => a.acc.name))] }))
+      run: x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0),
+      camps: [...new Set(x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0).map(a => a.camp))], accs: [...new Set(x.list.map(a => a.acc.name))] }))
     .filter(x => x.m.purch > 0 || x.m.value > 0)   // tanpa purchase & tanpa value = tidak menghasilkan → tidak masuk
     .sort((a, b) => winScore(b.m) - winScore(a.m));
   return {
     title: `Summary per naming (nama konten iklan) · ${groups.length} konten yang menghasilkan purchase · B2/B3/SQ/Shopee/VATC/Copy digabung · sama untuk export Campaigns/Ad sets/Ads`,
-    head: ["Peringkat", "Naming", "Jumlah iklan", "Jumlah campaign", "Jumlah akun", "Akun", ...MCOLS.map(c => c.t), "Campaign"],
+    head: ["Peringkat", "Naming", "Iklan yang jalan (ada spend)", "Campaign yang jalan", "Jumlah akun", "Akun", ...MCOLS.map(c => c.t), "Campaign"],
     kinds: ["int", "txt", "int", "int", "int", "txt", ...MCOLS.map(c => MKIND[c.k]), "txt"],
-    rows: groups.map((x, i) => [i + 1, x.label, x.list.length, x.camps.length, x.accs.length, x.accs.join(", "), ...MCOLS.map(c => c.x(x.m)), x.camps.map(c => c.name).join("  |  ")]),
-    total: ["", "TOTAL", groups.reduce((t, x) => t + x.list.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), new Set(groups.flatMap(x => x.accs)).size, "", ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
+    rows: groups.map((x, i) => [i + 1, x.label, x.run.length, x.camps.length, x.accs.length, x.accs.join(", "), ...MCOLS.map(c => c.x(x.m)), x.camps.map(c => c.name).join("  |  ")]),
+    total: ["", "TOTAL", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), new Set(groups.flatMap(x => x.accs)).size, "", ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
     dup: groups.map(x => x.list.length > 1), dupCol: 1
   };
 }
@@ -1170,7 +1174,7 @@ function exportData() {
     return { title: `Cek data · ${rangeText()}`, head: ["Akun", "ID", "Spend level akun", "Spend campaign Active+Paused", "Spend per iklan", "Purchases", "Conversion value"], kinds: ["txt", "txt", "rp", "rp", "rp", "int", "rp"], rows };
   }
   if (S.view === "content") {
-    const g = {}; ADS.filter(a => scopeOk(a) && qOk(a)).forEach(a => (g[a.ck] ||= { name: namingOf(a.name), ads: [] }).ads.push(a));
+    const g = {}; ADS.filter(a => scopeOk(a) && qOk(a)).forEach(a => (g[a.ck] ||= { name: a.name, ads: [] }).ads.push(a));
     const list = Object.values(g).map(x => ({ ...x, m: sumM(x.ads.map(a => AM.get(a.id))) })).filter(x => x.m.spend > 0).sort((a, b) => winScore(b.m) - winScore(a.m));
     return { title: `Winning content · ${rangeText()}`, head: ["Konten", "Jumlah akun", "Jumlah iklan", ...mh], kinds: ["txt", "int", "int", ...mk],
       rows: list.map(x => [x.name, new Set(x.ads.map(a => a.acc.id)).size, x.ads.length, ...mv(x.m)]), total: ["TOTAL", "", list.reduce((t, x) => t + x.ads.length, 0), ...mv(sumM(list.map(x => x.m)))] };
