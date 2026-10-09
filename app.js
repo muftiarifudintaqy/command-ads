@@ -1186,27 +1186,29 @@ function namingOfEnt(e) {   // naming untuk campaign / ad set / iklan
   return x;
 }
 const namingKeyEnt = e => namingOfEnt(e).toLowerCase().replace(/[\s_.]+/g, "");
+const accIdx = acc => ACCOUNTS.indexOf(acc);
 function namingSummary(ents) {
   // dihitung SELALU dari level iklan (nama konten) — export dari Campaigns, Ad sets, atau Ads menghasilkan sheet Naming yang SAMA
   const seen = new Set(), ads = [];
   ents.forEach(e => (e.level === "ad" ? [e] : adsIn(e)).forEach(a => { if (!seen.has(a.id) && scopeOk(a) && qOk(a)) { seen.add(a.id); ads.push(a); } }));
   const g = new Map();
   ads.forEach(a => {
-    const label = namingOfEnt(a), k = label.toLowerCase().replace(/[\s_.]+/g, "");
-    if (!g.has(k)) g.set(k, { label, list: [] }); g.get(k).list.push(a);
+    const label = namingOfEnt(a), k = a.acc.id + "|" + label.toLowerCase().replace(/[\s_.]+/g, "");
+    if (!g.has(k)) g.set(k, { label, acc: a.acc, list: [] }); g.get(k).list.push(a);
   });
   const groups = [...g.values()].map(x => ({ ...x, m: sumM(x.list.map(a => AM.get(a.id))),
       run: x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0),
       camps: [...new Set(x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0).map(a => a.camp))], accs: [...new Set(x.list.map(a => a.acc.name))] }))
     .filter(x => x.m.purch > 0 || x.m.value > 0)   // tanpa purchase & tanpa value = tidak menghasilkan → tidak masuk
-    .sort((a, b) => winScore(b.m) - winScore(a.m));
+    .sort((a, b) => accIdx(a.acc) - accIdx(b.acc) || winScore(b.m) - winScore(a.m));
+  const rk = new Map();   // peringkat dihitung per akun
   return {
     title: `Summary per naming (nama konten iklan) · ${groups.length} konten yang menghasilkan purchase · B2/B3/SQ/Shopee/VATC/Copy digabung · sama untuk export Campaigns/Ad sets/Ads`,
-    head: ["Peringkat", "Naming", "Produk", "Iklan yang jalan (ada spend)", "Campaign yang jalan", "Jumlah akun", "Akun", ...MCOLS.map(c => c.t), "Campaign"],
-    kinds: ["int", "txt", "txt", "int", "int", "int", "txt", ...MCOLS.map(c => MKIND[c.k]), "txt"],
-    rows: groups.map((x, i) => [i + 1, x.label, [...new Set(x.list.map(productOf).filter(Boolean))].join(", "), x.run.length, x.camps.length, x.accs.length, x.accs.join(", "), ...MCOLS.map(c => c.x(x.m)), x.camps.map(c => c.name).join("  |  ")]),
-    total: ["", "TOTAL", "", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), new Set(groups.flatMap(x => x.accs)).size, "", ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
-    dup: groups.map(x => x.list.length > 1), dupCol: 1
+    head: ["Peringkat", "Akun", "Naming", "Produk", "Iklan yang jalan (ada spend)", "Campaign yang jalan", ...MCOLS.map(c => c.t), "Campaign"],
+    kinds: ["int", "txt", "txt", "txt", "int", "int", ...MCOLS.map(c => MKIND[c.k]), "txt"],
+    rows: groups.map(x => [rk.set(x.acc.id, (rk.get(x.acc.id) || 0) + 1).get(x.acc.id), x.acc.name, x.label, [...new Set(x.list.map(productOf).filter(Boolean))].join(", "), x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m)), x.camps.map(c => c.name).join("  |  ")]),
+    total: ["", "TOTAL", `${groups.length} naming`, "", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
+    dup: groups.map(x => x.list.length > 1), dupCol: 2
   };
 }
 function exportData() {
@@ -1231,14 +1233,14 @@ function exportData() {
   const ents = visibleRows().slice().sort((a, b) => {   // dikelompokkan: Naikkan budget → Potensi → Optimasi → Pantau → Matikan, di dalamnya yang paling winning dulu
     const va = clGet(a.id)?.data?.verdict, vb = clGet(b.id)?.data?.verdict;
     const ra = VRANK[V[va] ? va : AI.get(a.id).v], rb = VRANK[V[vb] ? vb : AI.get(b.id).v];
-    return ra - rb || winScore(mOf(b)) - winScore(mOf(a));
+    return accIdx(a.acc) - accIdx(b.acc) || ra - rb || winScore(mOf(b)) - winScore(mOf(a));
   });
   const verdict = e => { const c = clGet(e.id)?.data; return { v: c && V[c.verdict] ? c.verdict : AI.get(e.id).v, why: c?.summary || AI.get(e.id).r[0] }; };
   return {
     title: `${viewName} · ${LVL[S.level][2]}s · ${rangeText()}`,
     head: ["Peringkat", "Akun", LVL[S.level][2] === "Ad" ? "Iklan" : LVL[S.level][2], "Naming", "Produk", "Delivery", "Rekomendasi", "Budget harian", ...mh, "Alasan rekomendasi", "Campaign", "ID"],
     kinds: ["int", "txt", "txt", "txt", "txt", "txt", "verdict", "rp", ...mk, "txt", "txt", "id"],
-    rows: ents.map((e, i) => { const vd = verdict(e); return [i + 1, e.acc.name, e.name, namingOfEnt(e), prodLabel(e), delivery(e).t, V[vd.v].label, e.budget ? Math.round(e.budget) : null, ...mv(mOf(e)), vd.why, e.level === "campaign" ? "" : e.camp.name, e.id]; }),
+    rows: (rk => ents.map(e => { const vd = verdict(e); rk.set(e.acc.id, (rk.get(e.acc.id) || 0) + 1); return [rk.get(e.acc.id), e.acc.name, e.name, namingOfEnt(e), prodLabel(e), delivery(e).t, V[vd.v].label, e.budget ? Math.round(e.budget) : null, ...mv(mOf(e)), vd.why, e.level === "campaign" ? "" : e.camp.name, e.id]; }))(new Map()),
     total: ["", "TOTAL", `${ents.length} ${LVL[S.level][1]}`, "", "", "", "", ents.reduce((t, e) => t + (e.budget || 0), 0) || null, ...mv(sumM(ents.map(mOf))), "", "", ""],
     summary: namingSummary(ents)
   };
@@ -1297,24 +1299,26 @@ function buildSheet(XLSX, d, title) {
   return ws;
 }
 
-function collectExport(target) {   // target: ID akun, array ID akun, atau kosong (= akun yang sedang dipilih / semua yang tampil)
-  let ids = Array.isArray(target) ? target : target && target !== "all" ? [target] : S.acc ? [S.acc] : S.multi.size ? ACCOUNTS.filter(a => S.multi.has(a.id) && !a.err && a.loaded).map(a => a.id)
-    : ACCOUNTS.filter(a => !a.err && a.loaded && (S.brand === "all" || a.brand === S.brand) && (S.pf === "all" || a.pf === S.pf)).map(a => a.id);
-  const out = [], used = new Set();
-  const uniq = n => { let x = String(n).replace(/[\[\]*?\/\\:]/g, "").slice(0, 31) || "Sheet", k = 2; while (used.has(x)) x = x.slice(0, 28) + " " + k++; used.add(x); return x; };
-  const prev = S.acc;
-  ids.forEach(id => {   // tiap akun → sheet data + sheet Naming
-    const acc = ACCOUNTS.find(a => a.id === id); if (!acc) return;
-    const d = id === S.acc ? exportData() : exportFor(id);
-    out.push({ name: uniq(acc.name), d });
-    if (d.summary && d.summary.rows.length) out.push({ name: uniq(`${acc.name.slice(0, 22)} · Naming`), d: d.summary });
-  });
-  if (S.acc !== prev) { S.acc = prev; compute(); }
-  const names = ids.map(id => ACCOUNTS.find(a => a.id === id)?.name).filter(Boolean);
-  const tag = names.length === 1 ? names[0] : names.length ? `${names.length}-akun` : "kosong";
+function comboName(accs) {   // "PREPARE CPAS - HK 1 - HK 2 - HK 3, Selow 0739 - 0740"
+  const g = new Map();
+  accs.forEach(a => { const i = a.name.lastIndexOf(" - "); const [pre, suf] = i > 0 ? [a.name.slice(0, i), a.name.slice(i + 3)] : [a.name, ""];
+    if (!g.has(pre)) g.set(pre, []); if (suf) g.get(pre).push(suf); });
+  return [...g.entries()].map(([pre, sufs]) => sufs.length ? `${pre} - ${sufs.join(" - ")}` : pre).join(", ");
+}
+function collectExport(target) {   // target: ID akun, array ID akun, atau kosong (= akun yang dicentang / dipilih / semua yang tampil)
+  let ids = Array.isArray(target) ? target : target && target !== "all" ? [target] : S.acc ? [S.acc] : S.multi.size ? [...S.multi]
+    : ACCOUNTS.filter(a => !a.err && a.loaded && pfOk(a)).map(a => a.id);
+  const accs = ACCOUNTS.filter(a => ids.includes(a.id) && !a.err);   // urut sesuai config: HK 1, HK 2, HK 3 …
+  const prevAcc = S.acc, prevMulti = S.multi;
+  S.acc = accs.length === 1 ? accs[0].id : null; S.multi = new Set(accs.map(a => a.id)); compute();
+  const d = exportData();
+  S.acc = prevAcc; S.multi = prevMulti; compute();
+  const name = comboName(accs) || "kosong";
+  const out = [{ name: "Data", title: `MONTERA ADS · ${name}`, d }];
+  if (d.summary && d.summary.rows.length) out.push({ name: "Naming", title: `MONTERA ADS · ${name} · Naming (winning)`, d: d.summary });
   const viewName = { all: "All ads", ai: "Montera AI", winning: "Winning ads", content: "Winning content", daily: "Rekap harian", check: "Cek data" }[S.view] + (["all", "ai", "winning"].includes(S.view) ? " · " + LVL[S.level][2] + "s" : "");
-  const fileTag = `${String(tag).toLowerCase().replace(/[^a-z0-9]+/g, "-")}${S.f.prod !== "all" ? "-" + String(S.f.prod).toLowerCase().replace(/[^a-z0-9]+/g, "") : ""}-${S.view === "daily" ? "rekap-harian" : S.view === "all" ? LVL[S.level][1].replace(" ", "") : S.view}-${S.from}_${S.to}`;
-  return { sheets: out, tag, viewName, fileTag };
+  const fileTag = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80)}${S.f.prod !== "all" ? "-" + String(S.f.prod).toLowerCase().replace(/[^a-z0-9]+/g, "") : ""}-${S.view === "daily" ? "rekap-harian" : S.view === "all" ? LVL[S.level][1].replace(" ", "") : S.view}-${S.from}_${S.to}`;
+  return { sheets: out, tag: name, viewName, fileTag };
 }
 // ---- pilih akun sebelum download ----
 function openExportPicker() {
@@ -1328,7 +1332,7 @@ function openExportPicker() {
       <div class="xp-q"><button class="btn sm-btn" data-xp="all">Pilih semua</button><button class="btn sm-btn" data-xp="none">Kosongkan</button></div>
       <div class="xp-list">${Object.entries(groups).map(([g, list]) => `<div class="xp-g"><label class="xp-gh"><input type="checkbox" data-xpg="${esc(g)}" ${list.every(a => sel.has(a.id)) ? "checked" : ""}> ${esc(g)}</label>
         ${list.map(a => `<label class="xp-i ${a.err || !a.loaded ? "dis" : ""}"><input type="checkbox" data-xpa="${a.id}" ${sel.has(a.id) ? "checked" : ""} ${a.err || !a.loaded ? "disabled" : ""}> ${esc(a.name)}</label>`).join("")}</div>`).join("")}</div>
-      <div class="xp-f"><span>${sel.size} akun → <b>${sel.size * 2} sheet</b> (data + Naming per akun)</span><button class="btn primary" data-xp="go" ${sel.size ? "" : "disabled"}>⤓ Download</button></div></div>`;
+      <div class="xp-f"><span>${sel.size} akun → <b>2 sheet</b> (Data + Naming, bisa difilter per akun & produk)</span><button class="btn primary" data-xp="go" ${sel.size ? "" : "disabled"}>⤓ Download</button></div></div>`;
   };
   box.addEventListener("click", e => {
     const t = e.target;
@@ -1365,7 +1369,7 @@ async function doExport(target, btn, mode) {   // mode: "xlsx" (default) atau "g
       if (win) win.location.href = j.url; else window.open(j.url, "_blank");
     } else {
       const XLSX = await loadXLSX(), wb = XLSX.utils.book_new();
-      sheets.forEach(({ name, d }) => XLSX.utils.book_append_sheet(wb, buildSheet(XLSX, d, name === "Info" ? "MONTERA ADS · Info" : `MONTERA ADS · ${name}`), name));
+      sheets.forEach(({ name, title, d }) => XLSX.utils.book_append_sheet(wb, buildSheet(XLSX, d, title || `MONTERA ADS · ${name}`), name));
       XLSX.writeFile(wb, `montera-ads-${fileTag}.xlsx`, { cellStyles: true });
     }
   } catch (err) { if (win) win.close(); alert(err.message); }
