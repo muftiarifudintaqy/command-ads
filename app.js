@@ -43,7 +43,8 @@ const S = {
   preset: "today", from: TODAY, to: TODAY,
   level: "campaign", view: "all", brand: "all", pf: "all", acc: null, q: "", accQ: "",
   aiFilter: null, sort: { k: "spend", dir: -1 }, sel: new Set(), lastSync: null,
-  panel: null, loading: "", busy: false
+  panel: null, loading: "", busy: false,
+  multi: new Set()   // akun yang dicentang (bisa lebih dari 1) → data, total & download ikut akun-akun ini
 };
 let RANGE = [TODAY];
 
@@ -55,7 +56,35 @@ const ACCOUNTS = CFG.accounts.map(a => ({
   spendSrc: (CFG.spendSource || { prepare: "account", skinlyfe: "campaign" })[a.token] || "account"
 }));
 let CAMPAIGNS = [], ADSETS = [], ADS = [], BY_ID = new Map();
+// PRODUK: ditentukan otomatis dari link Shopee iklan, lalu kode di nama campaign/ad set/iklan (mis. "- LS -", "- LF -").
+// Daftar & kata kuncinya bisa diubah di config.php → 'products'.
+const PRODUCTS = (CFG.products && CFG.products.length ? CFG.products : [
+  { label: "LS", match: ["ls", "lipseed", "lip seed", "lip serum", "lipserum", "lip oil"] },
+  { label: "Leafit", match: ["lf", "leafit"] },
+  { label: "NS", match: ["ns"] },
+  { label: "UA", match: ["ua"] },
+  { label: "Eyecream", match: ["eyecream", "eye cream"] },
+  { label: "Footspray", match: ["footspray", "foot spray"] },
+  { label: "Mouth Spray", match: ["mouth spray", "mouthspray", "ms"] }
+]).map(p => ({ label: p.label, keys: (p.match || []).map(k => " " + String(k).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ") }));
+function productOfText(t) {
+  if (!t) return "";
+  const x = " " + String(t).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ";
+  for (const p of PRODUCTS) if (p.keys.some(k => k.trim() && x.includes(k))) return p.label;
+  return "";
+}
+const PRODC = new Map();
+function productOf(ad) {   // produk 1 iklan
+  if (PRODC.has(ad.id)) return PRODC.get(ad.id);
+  let slug = "";
+  try { const u = new URL(ad.link); slug = decodeURIComponent(u.pathname + " " + u.search).replace(/-i\.\d+\.\d+.*/, ""); } catch {}
+  const r = productOfText(slug) || productOfText(ad.camp?.name) || productOfText(ad.adset?.name) || productOfText(ad.name);
+  PRODC.set(ad.id, r); return r;
+}
+const productsOfEnt = e => [...new Set((e.level === "ad" ? [e] : adsIn(e)).map(productOf).filter(Boolean))];
+const prodLabel = e => productsOfEnt(e).join(", ");
 function rebuild() {
+  PRODC.clear();
   CAMPAIGNS = ACCOUNTS.flatMap(a => a.campaigns.filter(c => c.ads.length));
   ADSETS = CAMPAIGNS.flatMap(c => c.adsets.filter(s => s.ads.length));
   ADS = ACCOUNTS.flatMap(a => a.ads);
@@ -123,21 +152,30 @@ function convOf(r) {  // sama persis dengan script sheet CPAS
 const rowArr = r => { const c = convOf(r); return [+r.spend || 0, +r.impressions || 0, +r.inline_link_clicks || 0, c.atc, c.purch, c.value, 0, c.vc, getAct(r.actions, ["video_view"]), getAct(r.video_thruplay_watched_actions, ["video_view"])]; };
 const normName = s => String(s || "").replace(/\s*-\s*(copy|salinan)(\s*\d+)?$/i, "").trim().toLowerCase();
 
+// creative + link tujuan (link Shopee) → dipakai untuk mendeteksi PRODUK iklan
+const AD_FIELDS_BASIC = "id,name,status,effective_status,adset_id,campaign_id,created_time";
+const AD_FIELDS_MID = AD_FIELDS_BASIC + ",creative{body,title,thumbnail_url}";
+const AD_FIELDS_FULL = AD_FIELDS_BASIC + ",creative{body,title,thumbnail_url,link_url,object_story_spec{link_data{link},video_data{call_to_action{value{link}}}},asset_feed_spec{link_urls{website_url}}}";
 const structReqs = acc => [
   { path: acc.act, params: { fields: "name,currency" } },
   { path: `${acc.act}/campaigns`, params: { fields: "id,name,status,effective_status,daily_budget,lifetime_budget,start_time", effective_status: ["ACTIVE", "IN_PROCESS", "WITH_ISSUES"], limit: 500 } },
   { path: `${acc.act}/adsets`, params: { fields: "id,name,campaign_id,status,daily_budget,lifetime_budget,start_time", effective_status: ["ACTIVE", "IN_PROCESS", "WITH_ISSUES"], limit: 500 } },
-  { path: `${acc.act}/ads`, params: { fields: "id,name,status,effective_status,adset_id,campaign_id,created_time,creative{body,title,thumbnail_url}", effective_status: LIVE_AD_ST, limit: 200 } }
+  { path: `${acc.act}/ads`, params: { fields: AD_FIELDS_FULL, effective_status: LIVE_AD_ST, limit: 200 } }
 ];
 function applyStructure(acc, [info, camps, sets, ads]) {
-  ads.forEach(o => { if (o.creative?.body) o.creative.body = o.creative.body.slice(0, 400); });
+  ads.forEach(o => {
+    const c = o.creative; if (!c) return;
+    if (c.body) c.body = c.body.slice(0, 400);
+    c.link = c.link || c.link_url || c.object_story_spec?.link_data?.link || c.object_story_spec?.video_data?.call_to_action?.value?.link || c.asset_feed_spec?.link_urls?.[0]?.website_url || "";
+    delete c.object_story_spec; delete c.asset_feed_spec; delete c.link_url;
+  });
   acc.raw = { info, camps, sets, ads }; acc.structAt = Date.now();
   buildStructure(acc);
 }
 async function loadStructure(acc) {   // jalur cadangan per akun (dengan retry & limit dikecilkan)
   const r = structReqs(acc);
   const res = await Promise.all(r.map((x, i) => i === 3
-    ? gget(x.path, x.params, acc).catch(() => gget(x.path, { ...x.params, fields: "id,name,status,effective_status,adset_id,campaign_id,created_time" }, acc))
+    ? gget(x.path, x.params, acc).catch(() => gget(x.path, { ...x.params, fields: AD_FIELDS_MID }, acc)).catch(() => gget(x.path, { ...x.params, fields: AD_FIELDS_BASIC }, acc))
     : gget(x.path, x.params, acc)));
   applyStructure(acc, res);
 }
@@ -168,7 +206,7 @@ function buildStructure(acc) {
     const text = cr.body || cr.title || "";
     const ad = { id, level: "ad", acc, camp: adset.camp, adset, name: o?.name || name || id, ck: normName(o?.name || name),
       desc: text ? text.replace(/\s+/g, " ").slice(0, 400) : "(Tidak ada primary text)", thumb: cr.thumbnail_url || null,
-      start: (o?.created_time || "").slice(0, 10) || adset.start, on: o?.status === "ACTIVE", eff: o?.effective_status || null, days: {}, freqR: null };
+      link: cr.link || "", start: (o?.created_time || "").slice(0, 10) || adset.start, on: o?.status === "ACTIVE", eff: o?.effective_status || null, days: {}, freqR: null };
     adset.ads.push(ad); adset.camp.ads.push(ad); aMap.set(id, ad); acc.ads.push(ad); return ad;
   };
   ads.forEach(o => mkAd(o.id, o.name));
@@ -327,7 +365,8 @@ const pfOk = acc => (S.brand === "all" || acc.brand === S.brand) && (S.pf === "a
 const adHay = a => [a.name, a.desc, a.camp.name, a.adset.name, a.acc.name, a.acc.id, a.id, a.camp.id, a.adset.id].join(" ").toLowerCase();
 let QSET = null;
 const qOk = a => !QSET || QSET.has(a.id);
-const scopeOk = a => pfOk(a.acc) && (!S.acc || a.acc.id === S.acc);
+const multiOk = acc => !S.multi.size || S.multi.has(acc.id);
+const scopeOk = a => pfOk(a.acc) && multiOk(a.acc) && (!S.acc || a.acc.id === S.acc);
 const adsIn = e => adsOf(e).filter(a => scopeOk(a) && qOk(a));
 let M = new Map(), AM = new Map();
 
@@ -349,7 +388,7 @@ function compute() {
 }
 // total akun = level akun (dedup) kalau tanpa pencarian; kalau ada pencarian = jumlah iklan yang cocok
 const accMetrics = acc => QSET ? sumM(acc.ads.filter(qOk).map(a => AM.get(a.id))) : derive(Object.assign(daysM(acc.days), { n: acc.ads.length }));
-const scopedAccounts = () => ACCOUNTS.filter(a => pfOk(a) && (!S.acc || a.id === S.acc));
+const scopedAccounts = () => ACCOUNTS.filter(a => pfOk(a) && multiOk(a) && (!S.acc || a.id === S.acc));
 
 // status
 const isOn = e => e.level === "campaign" ? e.on : e.level === "adset" ? e.camp.on && e.on : e.camp.on && e.adset.on && e.on;
@@ -550,7 +589,7 @@ function clBulkHTML() {
 // ROWS
 // =========================================================
 const levelList = () => S.level === "campaign" ? CAMPAIGNS : S.level === "adset" ? ADSETS : ADS;
-const F0 = () => ({ funnel: "all", deliv: "all", verdict: "all", spendMin: "", roasMin: "", roasMax: "", purchMin: "", hasSpend: false, hideReject: false });
+const F0 = () => ({ funnel: "all", prod: "all", deliv: "all", verdict: "all", spendMin: "", roasMin: "", roasMax: "", purchMin: "", hasSpend: false, hideReject: false });
 S.f = F0();
 const escRe = x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const FUNNELS = (CFG.funnels || [{ label: "TOFU", match: ["tofu"] }, { label: "MOFU", match: ["mofu"] }, { label: "BOFU", match: ["bofu"] }, { label: "SHOPEE", match: ["shopee"] }])
@@ -560,6 +599,7 @@ const inFunnel = (e, label) => label === "Lainnya" ? !FUNNELS.some(f => f.re.tes
 function filterOk(e) {
   const f = S.f, m = M.get(e.id), d = delivery(e).t;
   if (f.funnel !== "all" && !inFunnel(e, f.funnel)) return false;
+  if (f.prod !== "all") { const ps = productsOfEnt(e); if (f.prod === "none" ? ps.length : !ps.includes(f.prod)) return false; }
   if (f.deliv !== "all" && (f.deliv === "Active" ? !["Active", "Learning"].includes(d) : d !== f.deliv)) return false;
   if (f.verdict !== "all") { const c = clGet(e.id)?.data; if ((c && V[c.verdict] ? c.verdict : AI.get(e.id).v) !== f.verdict) return false; }
   if (f.hasSpend && !(m.spend > 0)) return false;
@@ -590,7 +630,8 @@ const periodLabel = () => S.preset === "custom" ? "Custom" : PRESET[S.preset][0]
 
 function renderHeader() {
   const acc = ACCOUNTS.find(a => a.id === S.acc);
-  $("#scopeLabel").innerHTML = acc ? `${LOGO}<b>${esc(acc.name)}</b><span class="muted">ID ${acc.id}</span>` : `${LOGO}<b>Semua akun</b><span class="muted">${ACCOUNTS.filter(pfOk).length} ad accounts${S.brand !== "all" ? " · " + esc(S.brand) : ""}${S.pf !== "all" ? " · " + esc(S.pf) : ""}</span>`;
+  if (!acc && S.multi.size) { $("#scopeLabel").innerHTML = `${LOGO}<b>${S.multi.size} akun dipilih</b><span class="muted">${ACCOUNTS.filter(x => S.multi.has(x.id)).map(x => esc(x.name)).join(", ")}</span>`; }
+  else $("#scopeLabel").innerHTML = acc ? `${LOGO}<b>${esc(acc.name)}</b><span class="muted">ID ${acc.id}</span>` : `${LOGO}<b>Semua akun</b><span class="muted">${ACCOUNTS.filter(pfOk).length} ad accounts${S.brand !== "all" ? " · " + esc(S.brand) : ""}${S.pf !== "all" ? " · " + esc(S.pf) : ""}</span>`;
   const errs = ACCOUNTS.filter(a => a.err);
   $("#srcBadge").className = "src " + (errs.length ? "warn" : "live");
   $("#srcBadge").innerHTML = `<span class="flame">🔥</span><b>LIVE</b>${errs.length ? ` · ${errs.length} akun gagal sync` : " · Meta API"}`;
@@ -602,8 +643,11 @@ function renderHeader() {
 }
 
 function accCard(sum, sub, m, extra, sel, attr, live, err) {
-  return `<button class="acc ${sel ? "sel" : ""} ${err ? "errc" : ""}" ${attr}>
-    <div class="acc-h">${sum ? `<span class="plogo all">Σ</span>` : LOGO}<div><b>${esc(sub[0])}</b><small>${esc(sub[1])}</small></div>${live != null ? `<i class="ddot ${live ? "on" : "off"}" title="${live} iklan aktif"></i>` : ""}</div>
+  const id = sum ? "" : (attr.match(/data-acc="([^"]*)"/) || [])[1];
+  const picked = id && S.multi.has(id);
+  const pick = sum || err ? "" : `<span class="acc-pick ${picked ? "on" : ""}" role="checkbox" aria-checked="${picked}" tabindex="0" data-pick="${id}" title="Centang untuk menggabungkan beberapa akun">${picked ? "✓" : ""}</span>`;
+  return `<button class="acc ${sel || picked ? "sel" : ""} ${err ? "errc" : ""}" ${attr}>
+    <div class="acc-h">${pick}${sum ? `<span class="plogo all">Σ</span>` : LOGO}<div><b>${esc(sub[0])}</b><small>${esc(sub[1])}</small></div>${live != null ? `<i class="ddot ${live ? "on" : "off"}" title="${live} iklan aktif"></i>` : ""}</div>
     ${err ? `<p class="acc-err">Gagal sync: ${esc(err)}</p>` : `<div class="acc-m">
       <div><small>Amount spent</small><b>${rp(m.spend)}</b></div>
       <div><small>Conversion value</small><b>${rp(m.value)}</b></div>
@@ -627,10 +671,11 @@ function renderAccounts() {
       .map(([k, t, n]) => `<button class="pill ${S.pf === k ? "on" : ""}" data-pf="${esc(k)}">${esc(t)}<span>${n}</span></button>`).join("") : "");
   let accs = ACCOUNTS.filter(a => pfOk(a) && (a.name + " " + a.id + " " + a.pf).toLowerCase().includes(S.accQ));
   if (S.q) accs = accs.filter(a => a.ads.some(qOk));
-  const tot = sumM(accs.filter(a => !a.err).map(accMetrics));
-  const allAds = accs.flatMap(a => a.ads.filter(qOk));
+  const totAccs = S.multi.size ? accs.filter(a => S.multi.has(a.id)) : accs;
+  const tot = sumM(totAccs.filter(a => !a.err).map(accMetrics));
+  const allAds = totAccs.flatMap(a => a.ads.filter(qOk));
   const qInfo = ads => S.q ? `<span class="qtag">"${esc(S.q)}": ${ads.length} iklan · ${new Set(ads.map(a => a.camp.id)).size} campaign</span>` : "";
-  let html = `<div class="acc-group"><div class="acc-group-label">${S.q ? `Total "${esc(S.q)}"` : "Total"} · ${periodLabel()}</div><div class="acc-row">${accCard(true, [S.q ? `${accs.length} akun cocok` : "Semua akun", `${accs.length} ad accounts`], tot, qInfo(allAds), !S.acc, `data-acc=""`, null)}</div></div>`;
+  let html = `<div class="acc-group"><div class="acc-group-label">${S.q ? `Total "${esc(S.q)}"` : "Total"} · ${periodLabel()}</div><div class="acc-row">${accCard(true, S.multi.size ? [`${S.multi.size} akun dipilih`, totAccs.map(a => a.name.replace(/PREPARE CPAS - |CPAS - SKINLYFE /i, "")).join(", ")] : [S.q ? `${accs.length} akun cocok` : "Semua akun", `${accs.length} ad accounts`], tot, qInfo(allAds) + (S.multi.size ? `<span class="acc-clear" role="button" tabindex="0" data-pickclear="1">✕ Hapus pilihan</span>` : ""), !S.acc, `data-acc=""`, null)}</div></div>`;
   const groups = {};
   accs.forEach(a => (groups[a.pf] ||= []).push(a));
   Object.entries(groups).forEach(([pf, list]) => {
@@ -649,6 +694,7 @@ function renderFilters() {
   const f = S.f, n = filterCount();
   $("#filters").innerHTML = `
     <label>Funnel <select data-f="funnel">${["all", ...FUNNELS.map(x => x.label), "Lainnya"].map(v => `<option value="${v}" ${f.funnel === v ? "selected" : ""}>${v === "all" ? "Semua" : v}</option>`).join("")}</select></label>
+    <label>Produk <select data-f="prod"><option value="all">Semua</option>${PRODUCTS.map(p => `<option value="${esc(p.label)}" ${f.prod === p.label ? "selected" : ""}>${esc(p.label)}</option>`).join("")}<option value="none" ${f.prod === "none" ? "selected" : ""}>Tidak terdeteksi</option></select></label>
     <label>Delivery <select data-f="deliv">${["all", "Active", "Off", "Rejected", "In review", "Error"].map(v => `<option value="${v}" ${f.deliv === v ? "selected" : ""}>${v === "all" ? "Semua" : v}</option>`).join("")}</select></label>
     <label>Rekomendasi <select data-f="verdict"><option value="all">Semua</option>${Object.keys(V).map(k => `<option value="${k}" ${f.verdict === k ? "selected" : ""}>${V[k].label}</option>`).join("")}</select></label>
     <label>Spend ≥ <input type="number" min="0" step="1000" data-f="spendMin" value="${f.spendMin}" placeholder="Rp"></label>
@@ -1008,7 +1054,9 @@ document.addEventListener("click", ev => {
   if (t.closest("[data-chk]") || t.id === "chkAll") return;
   const op = t.closest("[data-open]"); if (op) { openPanel(op.dataset.open); return; }
   const ct = t.closest("[data-content]"); if (ct) { setQ(ct.dataset.content); S.view = "all"; S.level = "ad"; closePanel(); render(); return; }
-  const acc = t.closest("[data-acc]"); if (acc) { S.acc = acc.dataset.acc || null; S.sel.clear(); render(); return; }
+  const pk = t.closest("[data-pick]"); if (pk) { ev.preventDefault(); ev.stopPropagation(); const id = pk.dataset.pick; S.multi.has(id) ? S.multi.delete(id) : S.multi.add(id); S.acc = null; S.sel.clear(); render(); return; }
+  if (t.closest("[data-pickclear]")) { ev.stopPropagation(); S.multi.clear(); render(); return; }
+  const acc = t.closest("[data-acc]"); if (acc) { S.acc = acc.dataset.acc || null; if (!acc.dataset.acc) S.multi.clear(); else S.multi.clear(); S.sel.clear(); render(); return; }
   const fn = t.closest("[data-funnel]"); if (fn) { S.f.funnel = S.f.funnel === fn.dataset.funnel ? "all" : fn.dataset.funnel; render(); return; }
   const br = t.closest("[data-brand]"); if (br) { S.brand = br.dataset.brand; S.pf = "all"; S.acc = null; render(); return; }
   const pf = t.closest("[data-pf]"); if (pf) { S.pf = pf.dataset.pf; S.acc = null; render(); return; }
@@ -1122,7 +1170,7 @@ function namingOf(n, whole) {   // whole=true → nama IKLAN: seluruh nama (tanp
   for (let k = 0; k < 3; k++) x = x
     .replace(/^sq[_\s-]+/i, "").replace(/\[\s*square\s*\]/ig, "").replace(/\(\s*\d+\s*\)/g, "")
     .replace(/\b(shopee|vatc|catalog(ue)?|cpas)\b/ig, "")
-    .replace(/[\s_-]+copy(\s*\d+)?$/i, "").replace(/[\s_-]+b\d{1,2}$/i, "")
+    .replace(/[\s_-]+copy(\s*\d+)?$/i, "").replace(/[\s_-]+b\d{1,2}$/i, "").replace(/[\s_-]+ori$/i, "")
     .replace(/\s+/g, " ").trim();
   return x || "(tanpa naming)";
 }
@@ -1154,10 +1202,10 @@ function namingSummary(ents) {
     .sort((a, b) => winScore(b.m) - winScore(a.m));
   return {
     title: `Summary per naming (nama konten iklan) · ${groups.length} konten yang menghasilkan purchase · B2/B3/SQ/Shopee/VATC/Copy digabung · sama untuk export Campaigns/Ad sets/Ads`,
-    head: ["Peringkat", "Naming", "Iklan yang jalan (ada spend)", "Campaign yang jalan", "Jumlah akun", "Akun", ...MCOLS.map(c => c.t), "Campaign"],
-    kinds: ["int", "txt", "int", "int", "int", "txt", ...MCOLS.map(c => MKIND[c.k]), "txt"],
-    rows: groups.map((x, i) => [i + 1, x.label, x.run.length, x.camps.length, x.accs.length, x.accs.join(", "), ...MCOLS.map(c => c.x(x.m)), x.camps.map(c => c.name).join("  |  ")]),
-    total: ["", "TOTAL", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), new Set(groups.flatMap(x => x.accs)).size, "", ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
+    head: ["Peringkat", "Naming", "Produk", "Iklan yang jalan (ada spend)", "Campaign yang jalan", "Jumlah akun", "Akun", ...MCOLS.map(c => c.t), "Campaign"],
+    kinds: ["int", "txt", "txt", "int", "int", "int", "txt", ...MCOLS.map(c => MKIND[c.k]), "txt"],
+    rows: groups.map((x, i) => [i + 1, x.label, [...new Set(x.list.map(productOf).filter(Boolean))].join(", "), x.run.length, x.camps.length, x.accs.length, x.accs.join(", "), ...MCOLS.map(c => c.x(x.m)), x.camps.map(c => c.name).join("  |  ")]),
+    total: ["", "TOTAL", "", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), new Set(groups.flatMap(x => x.accs)).size, "", ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
     dup: groups.map(x => x.list.length > 1), dupCol: 1
   };
 }
@@ -1188,10 +1236,10 @@ function exportData() {
   const verdict = e => { const c = clGet(e.id)?.data; return { v: c && V[c.verdict] ? c.verdict : AI.get(e.id).v, why: c?.summary || AI.get(e.id).r[0] }; };
   return {
     title: `${viewName} · ${LVL[S.level][2]}s · ${rangeText()}`,
-    head: ["Peringkat", "Akun", LVL[S.level][2] === "Ad" ? "Iklan" : LVL[S.level][2], "Naming", "Delivery", "Rekomendasi", "Budget harian", ...mh, "Alasan rekomendasi", "Campaign", "ID"],
-    kinds: ["int", "txt", "txt", "txt", "txt", "verdict", "rp", ...mk, "txt", "txt", "id"],
-    rows: ents.map((e, i) => { const vd = verdict(e); return [i + 1, e.acc.name, e.name, namingOfEnt(e), delivery(e).t, V[vd.v].label, e.budget ? Math.round(e.budget) : null, ...mv(mOf(e)), vd.why, e.level === "campaign" ? "" : e.camp.name, e.id]; }),
-    total: ["", "TOTAL", `${ents.length} ${LVL[S.level][1]}`, "", "", "", ents.reduce((t, e) => t + (e.budget || 0), 0) || null, ...mv(sumM(ents.map(mOf))), "", "", ""],
+    head: ["Peringkat", "Akun", LVL[S.level][2] === "Ad" ? "Iklan" : LVL[S.level][2], "Naming", "Produk", "Delivery", "Rekomendasi", "Budget harian", ...mh, "Alasan rekomendasi", "Campaign", "ID"],
+    kinds: ["int", "txt", "txt", "txt", "txt", "txt", "verdict", "rp", ...mk, "txt", "txt", "id"],
+    rows: ents.map((e, i) => { const vd = verdict(e); return [i + 1, e.acc.name, e.name, namingOfEnt(e), prodLabel(e), delivery(e).t, V[vd.v].label, e.budget ? Math.round(e.budget) : null, ...mv(mOf(e)), vd.why, e.level === "campaign" ? "" : e.camp.name, e.id]; }),
+    total: ["", "TOTAL", `${ents.length} ${LVL[S.level][1]}`, "", "", "", "", ents.reduce((t, e) => t + (e.budget || 0), 0) || null, ...mv(sumM(ents.map(mOf))), "", "", ""],
     summary: namingSummary(ents)
   };
 }
@@ -1249,31 +1297,52 @@ function buildSheet(XLSX, d, title) {
   return ws;
 }
 
-function collectExport(target) {   // kumpulkan sheet: sesuai tampilan / 1 akun / semua akun (+ per akun)
-  const out = [];
-  const push = (d, name, withSummary = true) => { out.push({ name, d }); if (withSummary && d.summary && d.summary.rows.length) out.push({ name: `${name.slice(0, 22)} · Naming`, d: d.summary }); };
-  let tag;
-  if (target && target !== "all") { const acc = ACCOUNTS.find(a => a.id === target); push(exportFor(target), acc.name); tag = acc.name; }
-  else if (S.acc && target !== "all") { const acc = ACCOUNTS.find(a => a.id === S.acc); push(exportData(), acc.name); tag = acc.name; }
-  else {
-    const prev = S.acc;
-    push(exportFor(null), "Semua akun");
-    if (S.view !== "check") ACCOUNTS.filter(a => !a.err && a.loaded && (S.brand === "all" || a.brand === S.brand) && (S.pf === "all" || a.pf === S.pf))
-      .forEach(a => { const d = exportFor(a.id); if (d.rows.length) push(d, a.name); });
-    S.acc = prev; compute();
-    tag = S.pf !== "all" ? S.pf : S.brand !== "all" ? S.brand : "semua-akun";
-  }
-  const viewName = { all: "All ads", ai: "Montera AI", winning: "Winning ads", content: "Winning content", daily: "Rekap harian", check: "Cek data" }[S.view] + (["all", "ai", "winning"].includes(S.view) ? " · " + LVL[S.level][2] + "s" : "");
-  const info = { title: "Keterangan export", head: ["Keterangan", "Isi"], rows: [
-    ["Tampilan", viewName], ["Tanggal data", rangeText()], ["Akun", tag], ["Pencarian", S.q || "-"], ["Funnel", S.f.funnel],
-    ["Urutan", "Paling winning di atas (Naikkan budget → Potensi → Optimasi → Pantau → Matikan), lalu ROAS & purchase tertinggi"],
-    ["Naming", "Bagian terakhir nama setelah ' - ' (mis. 'LF 002D'); nama yang persis sama dijumlah di sheet 'Naming'"],
-    ["Diekspor", new Date().toLocaleString("id-ID")]] };
-  const used = new Set();
+function collectExport(target) {   // target: ID akun, array ID akun, atau kosong (= akun yang sedang dipilih / semua yang tampil)
+  let ids = Array.isArray(target) ? target : target && target !== "all" ? [target] : S.acc ? [S.acc] : S.multi.size ? ACCOUNTS.filter(a => S.multi.has(a.id) && !a.err && a.loaded).map(a => a.id)
+    : ACCOUNTS.filter(a => !a.err && a.loaded && (S.brand === "all" || a.brand === S.brand) && (S.pf === "all" || a.pf === S.pf)).map(a => a.id);
+  const out = [], used = new Set();
   const uniq = n => { let x = String(n).replace(/[\[\]*?\/\\:]/g, "").slice(0, 31) || "Sheet", k = 2; while (used.has(x)) x = x.slice(0, 28) + " " + k++; used.add(x); return x; };
-  out.forEach(o => o.name = uniq(o.name)); out.push({ name: uniq("Info"), d: info });
-  const fileTag = `${String(tag).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${S.view === "daily" ? "rekap-harian" : S.view === "all" ? LVL[S.level][1].replace(" ", "") : S.view}-${S.from}_${S.to}`;
+  const prev = S.acc;
+  ids.forEach(id => {   // tiap akun → sheet data + sheet Naming
+    const acc = ACCOUNTS.find(a => a.id === id); if (!acc) return;
+    const d = id === S.acc ? exportData() : exportFor(id);
+    out.push({ name: uniq(acc.name), d });
+    if (d.summary && d.summary.rows.length) out.push({ name: uniq(`${acc.name.slice(0, 22)} · Naming`), d: d.summary });
+  });
+  if (S.acc !== prev) { S.acc = prev; compute(); }
+  const names = ids.map(id => ACCOUNTS.find(a => a.id === id)?.name).filter(Boolean);
+  const tag = names.length === 1 ? names[0] : names.length ? `${names.length}-akun` : "kosong";
+  const viewName = { all: "All ads", ai: "Montera AI", winning: "Winning ads", content: "Winning content", daily: "Rekap harian", check: "Cek data" }[S.view] + (["all", "ai", "winning"].includes(S.view) ? " · " + LVL[S.level][2] + "s" : "");
+  const fileTag = `${String(tag).toLowerCase().replace(/[^a-z0-9]+/g, "-")}${S.f.prod !== "all" ? "-" + String(S.f.prod).toLowerCase().replace(/[^a-z0-9]+/g, "") : ""}-${S.view === "daily" ? "rekap-harian" : S.view === "all" ? LVL[S.level][1].replace(" ", "") : S.view}-${S.from}_${S.to}`;
   return { sheets: out, tag, viewName, fileTag };
+}
+// ---- pilih akun sebelum download ----
+function openExportPicker() {
+  const sel = new Set(S.acc ? [S.acc] : ACCOUNTS.filter(a => !a.err && a.loaded && (S.brand === "all" || a.brand === S.brand) && (S.pf === "all" || a.pf === S.pf)).map(a => a.id));
+  const groups = {}; ACCOUNTS.forEach(a => (groups[`${a.brand} · ${a.pf}`] ||= []).push(a));
+  const box = document.createElement("div"); box.className = "xp-back";
+  const draw = () => {
+    box.innerHTML = `<div class="xp" role="dialog" aria-label="Download Excel">
+      <div class="xp-h"><b>Download Excel</b><button class="xp-x" data-xp="close" aria-label="Tutup">✕</button></div>
+      <p class="xp-sub">${esc(rangeText())} · ${esc(LVL[S.level][2])}s${S.f.prod !== "all" ? ` · Produk: <b>${esc(S.f.prod === "none" ? "Tidak terdeteksi" : S.f.prod)}</b>` : ""}${filterCount() ? ` · ${filterCount()} filter aktif` : ""}</p>
+      <div class="xp-q"><button class="btn sm-btn" data-xp="all">Pilih semua</button><button class="btn sm-btn" data-xp="none">Kosongkan</button></div>
+      <div class="xp-list">${Object.entries(groups).map(([g, list]) => `<div class="xp-g"><label class="xp-gh"><input type="checkbox" data-xpg="${esc(g)}" ${list.every(a => sel.has(a.id)) ? "checked" : ""}> ${esc(g)}</label>
+        ${list.map(a => `<label class="xp-i ${a.err || !a.loaded ? "dis" : ""}"><input type="checkbox" data-xpa="${a.id}" ${sel.has(a.id) ? "checked" : ""} ${a.err || !a.loaded ? "disabled" : ""}> ${esc(a.name)}</label>`).join("")}</div>`).join("")}</div>
+      <div class="xp-f"><span>${sel.size} akun → <b>${sel.size * 2} sheet</b> (data + Naming per akun)</span><button class="btn primary" data-xp="go" ${sel.size ? "" : "disabled"}>⤓ Download</button></div></div>`;
+  };
+  box.addEventListener("click", e => {
+    const t = e.target;
+    if (t === box || t.closest('[data-xp="close"]')) { box.remove(); return; }
+    if (t.closest('[data-xp="all"]')) { ACCOUNTS.filter(a => !a.err && a.loaded).forEach(a => sel.add(a.id)); draw(); return; }
+    if (t.closest('[data-xp="none"]')) { sel.clear(); draw(); return; }
+    const go = t.closest('[data-xp="go"]'); if (go) { box.remove(); doExport([...sel], $("#btnExport"), "xlsx"); return; }
+  });
+  box.addEventListener("change", e => {
+    const t = e.target;
+    if (t.dataset.xpa) { t.checked ? sel.add(t.dataset.xpa) : sel.delete(t.dataset.xpa); draw(); }
+    if (t.dataset.xpg) { ACCOUNTS.filter(a => `${a.brand} · ${a.pf}` === t.dataset.xpg && !a.err && a.loaded).forEach(a => t.checked ? sel.add(a.id) : sel.delete(a.id)); draw(); }
+  });
+  draw(); document.body.appendChild(box);
 }
 async function doExport(target, btn, mode) {   // mode: "xlsx" (default) atau "gsheet"
   mode = mode || btn?.dataset?.mode || "xlsx";
@@ -1303,7 +1372,9 @@ async function doExport(target, btn, mode) {   // mode: "xlsx" (default) atau "g
   if (btn) { btn.classList.remove("busy"); btn.innerHTML = label; }
 }
 $("#btnSheets")?.addEventListener("click", e => doExport(undefined, e.currentTarget, "gsheet"));
-$("#btnExport").addEventListener("click", e => doExport(undefined, e.currentTarget));
+$("#btnExport").addEventListener("click", e => {   // ada akun dicentang / 1 akun dipilih → langsung download; kalau belum → pilih akun dulu
+  if (S.multi.size || S.acc) doExport(undefined, e.currentTarget, "xlsx"); else openExportPicker();
+});
 
 
 // =========================================================

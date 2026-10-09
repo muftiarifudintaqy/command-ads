@@ -1,12 +1,26 @@
 <?php
 /* ============================================================
-   CONTOH KONFIGURASI — copy jadi config.php lalu isi token & API key.
-   config.php TIDAK boleh di-commit ke GitHub (sudah ada di .gitignore).
+   KONFIGURASI UNTUK SERVER/DOCKER — semua rahasia dibaca dari ENVIRONMENT VARIABLE,
+   jadi file ini AMAN di-commit ke GitHub (tidak berisi token apa pun).
+   - Di laptop: pakai config.php (tidak di-commit). Kalau config.php tidak ada, file ini yang dipakai.
+   - Di server/hosting: isi env var: META_TOKEN_PREPARE, META_TOKEN_SKINLYFE, GEMINI_API_KEY,
+     LOGIN_USERS (format: email1:pass1,email2:pass2), APP_PASSWORD (opsional).
    Token Meta & API key AI TIDAK dikirim ke browser.
    ============================================================ */
 return [
     // Password masuk dashboard. WAJIB diisi kalau di-upload ke VPS/hosting.
-    'app_password' => '',
+    'app_password' => getenv('APP_PASSWORD') ?: '',
+
+    // ATAU login per orang (nama => password). Kalau diisi, kolom "Nama" wajib & app_password diabaikan.
+    // contoh: 'login_users' => ['mufti' => 'rahasia123', 'dewi' => 'passwordDewi'],
+    'login_users' => (function () {
+        $out = [];
+        foreach (array_filter(array_map('trim', explode(',', (string)getenv('LOGIN_USERS')))) as $pair) {
+            [$u, $p] = array_pad(explode(':', $pair, 2), 2, '');
+            if ($u !== '' && $p !== '') $out[trim($u)] = trim($p);
+        }
+        return $out;
+    })(),
 
     'graph_version' => 'v21.0',
     'attribution'   => ['7d_click', '1d_view'],   // sama dengan script sheet CPAS
@@ -25,9 +39,21 @@ return [
         ['label' => 'SHOPEE', 'match' => ['shopee']],
     ],
 
+    // PRODUK iklan — dideteksi otomatis dari link Shopee iklan, lalu dari kode di nama campaign/ad set/iklan.
+    // 'match' = kata kunci (huruf besar/kecil bebas, harus kata utuh). Tambah/ubah sesukanya.
+    'products' => [
+        ['label' => 'LS',          'match' => ['ls', 'lipseed', 'lip seed', 'lip serum', 'lipserum', 'lip oil']],
+        ['label' => 'Leafit',      'match' => ['lf', 'leafit']],
+        ['label' => 'NS',          'match' => ['ns']],
+        ['label' => 'UA',          'match' => ['ua']],
+        ['label' => 'Eyecream',    'match' => ['eyecream', 'eye cream']],
+        ['label' => 'Footspray',   'match' => ['footspray', 'foot spray']],
+        ['label' => 'Mouth Spray', 'match' => ['mouth spray', 'mouthspray', 'ms']],
+    ],
+
     'tokens' => [
-        'prepare' => 'ISI_TOKEN_META_PREPARE',
-        'skinlyfe' => 'ISI_TOKEN_META_SKINLYFE',
+        'prepare'  => getenv('META_TOKEN_PREPARE') ?: '',
+        'skinlyfe' => getenv('META_TOKEN_SKINLYFE') ?: '',
     ],
 
     'accounts' => [
@@ -53,11 +79,20 @@ return [
         ['name' => 'CPAS - SKINLYFE HK - 4', 'id' => 'act_1009402191333762', 'group' => 'Skinlyfe CPAS', 'token' => 'skinlyfe'],
     ],
 
+    // Export langsung ke Google Sheets (lihat file montera-sheets.gs untuk cara pasang)
+    'google_sheets' => [
+        'webapp_url' => getenv('GSHEET_WEBAPP_URL') ?: '',   // URL Web App Apps Script (…/exec)
+        'secret'     => getenv('GSHEET_SECRET') ?: '',   // harus SAMA dengan SECRET di Apps Script
+        'share_with' => [],   // email yang otomatis diberi akses edit, mis. ['adila@montera.id']
+        'link_view'  => false,   // true = siapa pun yang punya link bisa melihat
+        'folder_id'  => '',   // opsional: ID folder Google Drive tujuan
+    ],
+
     // AI analis. provider: 'gemini' (gratis) | 'ollama' (gratis, lokal) | 'claude' (berbayar)
     'ai' => [
         'provider' => 'gemini',
         'gemini' => [
-            'api_key'  => '',
+            'api_key'  => getenv('GEMINI_API_KEY') ?: '',
             'model'    => 'gemini-pro-latest',    // model paling pintar (berpikir lebih dalam); kalau limit → otomatis turun ke flash
             'fallback' => ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest'],
         ],
