@@ -1208,7 +1208,8 @@ function namingSummary(ents) {
     kinds: ["int", "txt", "txt", "txt", "int", "int", ...MCOLS.map(c => MKIND[c.k]), "txt"],
     rows: groups.map(x => [rk.set(x.acc.id, (rk.get(x.acc.id) || 0) + 1).get(x.acc.id), x.acc.name, x.label, [...new Set(x.list.map(productOf).filter(Boolean))].join(", "), x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m)), x.camps.map(c => c.name).join("  |  ")]),
     total: ["", "TOTAL", `${groups.length} naming`, "", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
-    dup: groups.map(x => x.list.length > 1), dupCol: 2
+    dup: groups.map(x => x.list.length > 1), dupCol: 2,
+    raws: groups.map(x => x.m), sumCols: [4, 5], countCol: 2, countWord: "naming"
   };
 }
 function exportData() {
@@ -1241,6 +1242,7 @@ function exportData() {
     head: ["Peringkat", "Akun", LVL[S.level][2] === "Ad" ? "Iklan" : LVL[S.level][2], "Naming", "Produk", "Delivery", "Rekomendasi", "Budget harian", ...mh, "Alasan rekomendasi", "Campaign", "ID"],
     kinds: ["int", "txt", "txt", "txt", "txt", "txt", "verdict", "rp", ...mk, "txt", "txt", "id"],
     rows: (rk => ents.map(e => { const vd = verdict(e); rk.set(e.acc.id, (rk.get(e.acc.id) || 0) + 1); return [rk.get(e.acc.id), e.acc.name, e.name, namingOfEnt(e), prodLabel(e), delivery(e).t, V[vd.v].label, e.budget ? Math.round(e.budget) : null, ...mv(mOf(e)), vd.why, e.level === "campaign" ? "" : e.camp.name, e.id]; }))(new Map()),
+    raws: ents.map(mOf), sumCols: [7], countCol: 2, countWord: LVL[S.level][1],
     total: ["", "TOTAL", `${ents.length} ${LVL[S.level][1]}`, "", "", "", "", ents.reduce((t, e) => t + (e.budget || 0), 0) || null, ...mv(sumM(ents.map(mOf))), "", "", ""],
     summary: namingSummary(ents)
   };
@@ -1269,6 +1271,14 @@ const XS = (() => {
   };
 })();
 function buildSheet(XLSX, d, title) {
+  // kolom bantu tersembunyi (klik, video 3 dtk, ThruPlay, impr×freq) → baris TOTAL bisa dihitung ulang saat difilter
+  const mStart = d.head.indexOf(MCOLS[0].t), HELP = !!(d.raws && mStart >= 0), nVis = d.head.length;
+  if (HELP) {
+    const raws = d.raws;
+    d = { ...d, head: [...d.head, "_klik", "_video3dtk", "_thruplay", "_imprxfreq"], kinds: [...(d.kinds || d.head.map(() => "txt")), "int", "int", "int", "int"],
+      rows: d.rows.map((r, i) => { const m = raws[i] || {}; return [...r, m.clicks || 0, m.v3 || 0, m.thru || 0, Math.round(m.fImpr || 0)]; }),
+      total: d.total ? [...d.total, 0, 0, 0, 0] : d.total };
+  }
   const kinds = d.kinds || d.head.map(() => "txt"), n = d.head.length;
   const aoa = [[title], [d.title || ""], d.head, ...d.rows, ...(d.total ? [d.total] : [])];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -1288,14 +1298,31 @@ function buildSheet(XLSX, d, title) {
     }
   });
   if (d.total) { const r = d.rows.length + 3; for (let c = 0; c < n; c++) set(r, c, XS.total(kinds[c])); }
-  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: n - 1 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: n - 1 } }];
+  // baris TOTAL = rumus SUBTOTAL → ikut berubah kalau sheet difilter (akun, produk, naming, dll.)
+  if (d.total && d.rows.length) {
+    const r = d.rows.length + 3, R1 = 4, R2 = d.rows.length + 3, col = c => XLSX.utils.encode_col(c);
+    const SUM = c => `SUBTOTAL(109,${col(c)}${R1}:${col(c)}${R2})`;
+    const putF = (c, f, str) => { const a = enc(r, c), o = ws[a] || {}; ws[a] = { ...o, t: str ? "s" : "n", f, v: str ? (o.v ?? "") : (typeof o.v === "number" ? o.v : 0) }; if (!str && o.s?.numFmt) ws[a].z = o.s.numFmt; };
+    (d.sumCols || []).forEach(c => putF(c, SUM(c)));
+    if (d.countCol != null) putF(d.countCol, `SUBTOTAL(103,${col(d.countCol)}${R1}:${col(d.countCol)}${R2})&" ${d.countWord || "baris"}"`, true);
+    if (HELP) {
+      const mc = k => mStart + MCOLS.findIndex(x => x.k === k), H = { clicks: nVis, v3: nVis + 1, thru: nVis + 2, fImpr: nVis + 3 };
+      const Sk = k => SUM(H[k] ?? mc(k)), div = (a, b, x = "") => `IFERROR(${Sk(a)}/${Sk(b)}${x},"")`;
+      const F = { spend: SUM(mc("spend")), purch: SUM(mc("purch")), value: SUM(mc("value")), atc: SUM(mc("atc")), vc: SUM(mc("vc")), impr: SUM(mc("impr")),
+        roas: div("value", "spend"), cpatc: div("spend", "atc"), cpvc: div("spend", "vc"), cpc: div("spend", "clicks"), cpa: div("spend", "purch"),
+        hook: div("v3", "impr", "*100"), hold: div("thru", "impr", "*100"), freq: div("fImpr", "impr"), ctr: div("clicks", "impr", "*100") };
+      MCOLS.forEach(x => F[x.k] && putF(mc(x.k), F[x.k]));
+      Object.values(H).forEach(c => putF(c, SUM(c)));
+    }
+  }
+  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: nVis - 1 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: nVis - 1 } }];
   ws["!rows"] = [{ hpt: 28 }, { hpt: 18 }, { hpt: 36 }];
   ws["!cols"] = d.head.map((h, i) => {
     const longest = Math.max(...d.rows.slice(0, 400).map(r => { const v = r[i]; return typeof v === "number" ? (kinds[i] === "rp" ? String(Math.round(v)).length + 6 : String(v).length + 2) : String(v ?? "").length; }), 0);
     const max = ["Alasan rekomendasi", "Akun", `Daftar ${LVL[S.level][0]}`].includes(h) ? 48 : 46;
-    return { wch: Math.min(max, Math.max(10, Math.min(String(h).length, 18), longest + 2)) };
+    return i >= nVis ? { wch: 10, hidden: true } : { wch: Math.min(max, Math.max(10, Math.min(String(h).length, 18), longest + 2)) };
   });
-  ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 2, c: 0 }, e: { r: d.rows.length + 2, c: n - 1 } }) };
+  ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 2, c: 0 }, e: { r: d.rows.length + 2, c: nVis - 1 } }) };
   return ws;
 }
 
