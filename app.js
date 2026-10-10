@@ -626,7 +626,9 @@ function filterOk(e) {
   return true;
 }
 const filterCount = () => Object.entries(S.f).filter(([k, v]) => v !== "" && v !== false && v !== "all").length;
-const baseRows = () => levelList().filter(e => adsIn(e).length > 0 && (M.get(e.id).spend > 0 || isOn(e)) && filterOk(e));
+// baris tampil: ada spend, ATAU masih aktif, ATAU ada purchase/value di periode itu walau spend Rp0
+// (iklan yang sudah off tapi purchase-nya baru tercatat — atribusi 7 hari klik — tetap dihitung seperti Ads Manager)
+const baseRows = () => levelList().filter(e => { const m = M.get(e.id); return adsIn(e).length > 0 && (m.spend > 0 || m.purch > 0 || m.value > 0 || isOn(e)) && filterOk(e); });
 function visibleRows() {
   let rows = baseRows();
   if (S.view === "ai" && S.aiFilter) rows = rows.filter(e => AI.get(e.id).v === S.aiFilter);
@@ -1205,7 +1207,8 @@ const accIdx = acc => ACCOUNTS.indexOf(acc);
 function namingSummary(ents) {
   // dihitung SELALU dari level iklan (nama konten) — export dari Campaigns, Ad sets, atau Ads menghasilkan sheet Naming yang SAMA
   const seen = new Set(), ads = [];
-  ents.forEach(e => (e.level === "ad" ? [e] : adsIn(e)).forEach(a => { if (!seen.has(a.id) && scopeOk(a) && qOk(a)) { seen.add(a.id); ads.push(a); } }));
+  // hanya IKLAN yang menghasilkan purchase/value (cara hitung tim: iklan tanpa purchase tidak ikut dijumlah ke naming)
+  ents.forEach(e => (e.level === "ad" ? [e] : adsIn(e)).forEach(a => { const m = AM.get(a.id) || {}; if (!seen.has(a.id) && scopeOk(a) && qOk(a) && m.purch > 0) { seen.add(a.id); ads.push(a); } }));
   const g = new Map();
   ads.forEach(a => {
     const label = namingOfEnt(a), k = a.acc.id + "|" + label.toLowerCase().replace(/[\s_.]+/g, "");
@@ -1214,11 +1217,11 @@ function namingSummary(ents) {
   const groups = [...g.values()].map(x => ({ ...x, m: sumM(x.list.map(a => AM.get(a.id))),
       run: x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0),
       camps: [...new Set(x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0).map(a => a.camp))], accs: [...new Set(x.list.map(a => a.acc.name))] }))
-    .filter(x => x.m.purch > 0 || x.m.value > 0)   // tanpa purchase & tanpa value = tidak menghasilkan → tidak masuk
+    .filter(x => x.m.purch > 0)   // naming tanpa purchase = tidak winning → tidak masuk
     .sort((a, b) => accIdx(a.acc) - accIdx(b.acc) || winScore(b.m) - winScore(a.m));
   const rk = new Map();   // peringkat dihitung per akun
   return {
-    title: `Summary per naming (nama konten iklan) · ${groups.length} konten yang menghasilkan purchase · B2/B3/SQ/Shopee/VATC/Copy digabung · sama untuk export Campaigns/Ad sets/Ads`,
+    title: `Summary per naming (nama konten iklan) · hanya iklan yang ada purchase · ${groups.length} konten · B2/B3/SQ/Shopee/VATC/Copy digabung · sama untuk export Campaigns/Ad sets/Ads`,
     head: ["Peringkat", "Akun", "Naming", "Produk", "Iklan yang jalan (ada spend)", "Campaign yang jalan", ...MCOLS.map(c => c.t), "Campaign"],
     kinds: ["int", "txt", "txt", "txt", "int", "int", ...MCOLS.map(c => MKIND[c.k]), "txt"],
     rows: groups.map(x => [rk.set(x.acc.id, (rk.get(x.acc.id) || 0) + 1).get(x.acc.id), x.acc.name, x.label, [...new Set(x.list.map(productOf).filter(Boolean))].join(", "), x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m)), x.camps.map(c => c.name).join("  |  ")]),
