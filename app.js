@@ -160,7 +160,7 @@ const structReqs = acc => [
   { path: acc.act, params: { fields: "name,currency" } },
   { path: `${acc.act}/campaigns`, params: { fields: "id,name,status,effective_status,daily_budget,lifetime_budget,start_time", effective_status: ["ACTIVE", "IN_PROCESS", "WITH_ISSUES"], limit: 500 } },
   { path: `${acc.act}/adsets`, params: { fields: "id,name,campaign_id,status,daily_budget,lifetime_budget,start_time", effective_status: ["ACTIVE", "IN_PROCESS", "WITH_ISSUES"], limit: 500 } },
-  { path: `${acc.act}/ads`, params: { fields: AD_FIELDS_FULL, effective_status: LIVE_AD_ST, limit: 200 } }
+  { path: `${acc.act}/ads`, params: { fields: AD_FIELDS_MID, effective_status: LIVE_AD_ST, limit: 200 } }   // tanpa link creative: field itu berat & bikin akun besar gagal/lemot (produk cukup dari nama campaign)
 ];
 function applyStructure(acc, [info, camps, sets, ads]) {
   ads.forEach(o => {
@@ -221,7 +221,22 @@ const insightReqs = acc => {
     { path: `${acc.act}/insights`, params: { ...base, level: "account", time_increment: 1, fields: `spend,impressions,inline_link_clicks,${CONV_FIELDS}` } }
   ];
 };
-async function loadInsights(acc) { applyInsights(acc, await Promise.all(insightReqs(acc).map(x => gget(x.path, x.params, acc)))); }
+const daysBetween = (a, b) => { const out = []; for (let d = new Date(a + "T00:00:00Z"); d <= new Date(b + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1)) out.push(d.toISOString().slice(0, 10)); return out; };
+async function ggetRetry(x, acc, tries = 3) {   // "Service temporarily unavailable" dari Meta → tunggu sebentar lalu ulang
+  for (let i = 0; ; i++) { try { return await gget(x.path, x.params, acc); } catch (e) { if (i >= tries - 1) throw e; await sleep(1500 * (i + 1)); } }
+}
+async function getAdInsights(acc, x) {   // akun besar (HK 1, Skinlyfe HK 1): kalau sekaligus gagal → ambil PER HARI dengan halaman kecil
+  try { return await ggetRetry(x, acc, 2); }
+  catch {
+    const out = [];
+    for (const d of daysBetween(S.from, S.to)) out.push(...await ggetRetry({ path: x.path, params: { ...x.params, time_range: { since: d, until: d }, limit: 150 } }, acc, 4));
+    return out;
+  }
+}
+async function loadInsights(acc) {
+  const [adReq, campReq, accReq] = insightReqs(acc);
+  applyInsights(acc, await Promise.all([getAdInsights(acc, adReq), ggetRetry(campReq, acc), ggetRetry(accReq, acc)]));
+}
 function applyInsights(acc, [adI, campI, accI]) {
   acc.ads.forEach(a => { a.days = {}; a.freqR = null; });
   acc.campaigns.forEach(c => c.days = {});
