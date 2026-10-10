@@ -795,7 +795,7 @@ const MCOLS = [   // urutan sama dengan view "Columns: CPAS" di Ads Manager
   { k: "spend", t: "Amount spent", c: m => rp(m.spend), f: t => [rp(t.spend), "Total spent"], x: m => Math.round(m.spend) },
   { k: "purch", t: "Purchases with shared items", c: m => m.purch ? num(m.purch) : "—", f: t => [num(t.purch), "Total"], x: m => m.purch },
   { k: "value", t: "Purchases conversion value", c: m => rp(m.value), f: t => [rp(t.value), "Total"], x: m => Math.round(m.value) },
-  { k: "roas", t: "Purchase ROAS", c: m => `<b class="${!m.purch ? "" : m.roas >= TARGET.roas ? "good" : "bad"}">${m.purch ? f2(m.roas) : "—"}</b>`, f: t => [t.purch ? f2(t.roas) : "—", "Average"], x: m => +m.roas.toFixed(2) },
+  { k: "roas", t: "Purchase ROAS", c: m => `<b class="${!m.purch ? "" : m.roas >= TARGET.roas ? "good" : "bad"}">${m.purch ? f2(m.roas) : "—"}</b>`, f: t => [t.purch ? f2(t.roas) : "—", "Average"], x: m => m.spend ? +m.roas.toFixed(2) : null },
   { k: "cpatc", t: "Cost per ATC", c: m => rp(m.cpatc), f: t => [rp(t.cpatc), "Per action"], x: m => m.cpatc ? Math.round(m.cpatc) : null },
   { k: "cpvc", t: "Cost per VC", c: m => rp(m.cpvc), f: t => [rp(t.cpvc), "Per action"], x: m => m.cpvc ? Math.round(m.cpvc) : null },
   { k: "cpc", t: "CPC (link)", c: m => rp(m.cpc), f: t => [rp(t.cpc), "Per action"], x: m => m.cpc ? Math.round(m.cpc) : null },
@@ -1224,7 +1224,7 @@ function namingSummary(ents) {
     title: `Summary per naming (nama konten iklan) · hanya iklan yang ada purchase · ${groups.length} konten · B2/B3/SQ/Shopee/VATC/Copy digabung · sama untuk export Campaigns/Ad sets/Ads`,
     head: ["Peringkat", "Akun", "Naming", "Produk", "Iklan yang jalan (ada spend)", "Campaign yang jalan", ...MCOLS.map(c => c.t), "Campaign"],
     kinds: ["int", "txt", "txt", "txt", "int", "int", ...MCOLS.map(c => MKIND[c.k]), "txt"],
-    rows: groups.map(x => [rk.set(x.acc.id, (rk.get(x.acc.id) || 0) + 1).get(x.acc.id), x.acc.name, x.label, [...new Set(x.list.map(productOf).filter(Boolean))].join(", "), x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m)), x.camps.map(c => c.name).join("  |  ")]),
+    rows: groups.map(x => [rk.set(x.acc.id, (rk.get(x.acc.id) || 0) + 1).get(x.acc.id), x.acc.name, x.label, [...new Set(x.list.map(productOf).filter(Boolean))].join(", "), x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m)), [...new Set(x.list.map(a => a.camp))].map(c => c.name).join("  |  ")]),
     total: ["", "TOTAL", `${groups.length} naming`, "", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
     dup: groups.map(x => x.list.length > 1), dupCol: 2,
     raws: groups.map(x => x.m), sumCols: [4, 5], countCol: 2, countWord: "naming"
