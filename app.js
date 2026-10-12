@@ -1206,9 +1206,10 @@ function namingOfEnt(e) {   // naming untuk campaign / ad set / iklan
 const namingKeyEnt = e => namingOfEnt(e).toLowerCase().replace(/[\s_.]+/g, "");
 const accIdx = acc => ACCOUNTS.indexOf(acc);
 function winAds(ents) {
-  // hanya IKLAN yang menghasilkan purchase (cara hitung tim: iklan tanpa purchase tidak ikut dijumlah ke naming)
+  // SEMUA iklan ikut dijumlah (termasuk yang purchase 0) → spend/purchase/value sama dengan Ads Manager "Ad name contains …".
+  // Naming yang total purchase-nya 0 tetap dibuang (bukan winning) — lihat filter m.purch > 0 di namingSummary/namingFix.
   const seen = new Set(), ads = [];
-  ents.forEach(e => (e.level === "ad" ? [e] : adsIn(e)).forEach(a => { const m = AM.get(a.id) || {}; if (!seen.has(a.id) && scopeOk(a) && qOk(a) && m.purch > 0) { seen.add(a.id); ads.push(a); } }));
+  ents.forEach(e => (e.level === "ad" ? [e] : adsIn(e)).forEach(a => { if (!seen.has(a.id) && scopeOk(a) && qOk(a)) { seen.add(a.id); ads.push(a); } }));
   return ads;
 }
 function namingFix(ents) {
@@ -1228,7 +1229,7 @@ function namingFix(ents) {
     .sort((a, b) => pOrder(a.prod) - pOrder(b.prod) || winScore(b.m) - winScore(a.m));
   const rk = new Map();   // peringkat dihitung per produk
   return {
-    title: `Gabungan semua akun per naming · hanya iklan yang ada purchase · ${groups.length} konten · naming sama dari akun berbeda dijumlah jadi 1 · dikelompokkan per produk`,
+    title: `Gabungan semua akun per naming · semua iklan dijumlah (sama dengan Ads Manager) · hanya naming yang ada purchase · ${groups.length} konten · naming sama dari akun berbeda dijumlah jadi 1 · dikelompokkan per produk`,
     head: ["Peringkat", "Naming", "Produk", "Jumlah akun", "Iklan yang jalan (ada spend)", "Campaign yang jalan", ...MCOLS.map(c => c.t)],
     kinds: ["int", "txt", "txt", "int", "int", "int", ...MCOLS.map(c => MKIND[c.k])],
     rows: groups.map(x => [rk.set(x.prod, (rk.get(x.prod) || 0) + 1).get(x.prod), x.label, x.prods.join(", "), x.accs.length, x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m))]),
@@ -1252,7 +1253,7 @@ function namingSummary(ents) {
     .sort((a, b) => accIdx(a.acc) - accIdx(b.acc) || winScore(b.m) - winScore(a.m));
   const rk = new Map();   // peringkat dihitung per akun
   return {
-    title: `Summary per naming (nama konten iklan) · hanya iklan yang ada purchase · ${groups.length} konten · B2/B3/SQ/Shopee/VATC/Copy digabung · sama untuk export Campaigns/Ad sets/Ads`,
+    title: `Summary per naming (nama konten iklan) · semua iklan dijumlah (sama dengan Ads Manager) · hanya naming yang ada purchase · ${groups.length} konten · B2/B3/SQ/Shopee/VATC/Copy digabung · sama untuk export Campaigns/Ad sets/Ads`,
     head: ["Peringkat", "Akun", "Naming", "Produk", "Iklan yang jalan (ada spend)", "Campaign yang jalan", ...MCOLS.map(c => c.t), "Campaign"],
     kinds: ["int", "txt", "txt", "txt", "int", "int", ...MCOLS.map(c => MKIND[c.k]), "txt"],
     rows: groups.map(x => [rk.set(x.acc.id, (rk.get(x.acc.id) || 0) + 1).get(x.acc.id), x.acc.name, x.label, [...new Set(x.list.map(productOf).filter(Boolean))].join(", "), x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m)), [...new Set(x.list.map(a => a.camp))].map(c => c.name).join("  |  ")]),
