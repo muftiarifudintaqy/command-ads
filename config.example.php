@@ -66,7 +66,7 @@ return [
         ['name' => 'GLOWING CANTIK - HK 3', 'id' => 'act_3047540522119266', 'group' => 'Glowing Cantik', 'token' => 'prepare'],
         ['name' => 'GLOWING CANTIK - HK LP 1', 'id' => 'act_832040079904272', 'group' => 'Glowing Cantik', 'token' => 'prepare'],
         ['name' => 'Prepare Selow ID 1129', 'id' => 'act_378258565369450', 'group' => 'Selow', 'token' => 'prepare'],
-        ['name' => 'Selow 0984', 'id' => 'act_2486099974918099', 'group' => 'Selow', 'token' => 'prepare'],
+        ['name' => 'Selow 0984', 'id' => 'act_2486099974918099', 'group' => 'Selow', 'token' => 'prepare', 'product' => 'Footspray'],   // 'product' = produk default kalau nama iklan tanpa kode produk (opsional)
         ['name' => 'Selow 1138', 'id' => 'act_1454778771836139', 'group' => 'Selow', 'token' => 'prepare'],
         ['name' => 'Selow 0739', 'id' => 'act_370824619365186', 'group' => 'Selow', 'token' => 'prepare'],
         ['name' => 'Selow 0740', 'id' => 'act_471743845465081', 'group' => 'Selow', 'token' => 'prepare'],

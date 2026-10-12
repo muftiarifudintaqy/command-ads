@@ -121,7 +121,7 @@ $public = [
     'spendSource' => $C['spend_source'],
     'funnels' => $C['funnels'],
     'products' => $C['products'] ?? [],
-    'accounts' => array_map(fn($a) => ['name' => $a['name'], 'id' => $a['id'], 'group' => $a['group'], 'token' => $a['token']], $C['accounts']),
+    'accounts' => array_map(fn($a) => ['name' => $a['name'], 'id' => $a['id'], 'group' => $a['group'], 'token' => $a['token'], 'product' => $a['product'] ?? ''], $C['accounts']),
     'ai' => ['provider' => $C['ai']['provider']],
     'loginEnabled' => $loginOn,
 ];

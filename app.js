@@ -51,6 +51,7 @@ let RANGE = [TODAY];
 // ---------- DATA ----------
 const ACCOUNTS = CFG.accounts.map(a => ({
   id: a.id.replace(/^act_/, ""), act: a.id.startsWith("act_") ? a.id : "act_" + a.id, name: a.name, pf: a.group, tokenKey: a.token,
+  prodDefault: a.product || "",   // produk default akun (config.php → 'product'), dipakai kalau nama iklan tidak mengandung kode produk
   brand: a.brand || (a.token.charAt(0).toUpperCase() + a.token.slice(1)),   // brand = dari token (prepare/skinlyfe), bisa ditimpa 'brand' di config
   currency: "IDR", campaigns: [], ads: [], days: {}, daysAll: {}, daysCamp: {}, err: null, loaded: false, maps: null, raw: null, structAt: 0,
   spendSrc: (CFG.spendSource || { prepare: "account", skinlyfe: "campaign" })[a.token] || "account"
@@ -64,7 +65,7 @@ const PRODUCTS = (CFG.products && CFG.products.length ? CFG.products : [
   { label: "NS", match: ["ns"] },
   { label: "UA", match: ["ua"] },
   { label: "Eyecream", match: ["eyecream", "eye cream"] },
-  { label: "Footspray", match: ["footspray", "foot spray"] },
+  { label: "Footspray", match: ["footspray", "foot spray", "fs", "footdeo", "footdeodorant", "foot deodorant", "deodorant", "foot care", "bau kaki"] },
   { label: "Mouth Spray", match: ["mouth spray", "mouthspray", "ms"] }
 ]).map(p => ({ label: p.label, keys: (p.match || []).map(k => " " + String(k).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ") }));
 function productOfText(t) {
@@ -78,7 +79,7 @@ function productOf(ad) {   // produk 1 iklan
   if (PRODC.has(ad.id)) return PRODC.get(ad.id);
   let slug = "";
   try { const u = new URL(ad.link); slug = decodeURIComponent(u.pathname + " " + u.search).replace(/-i\.\d+\.\d+.*/, ""); } catch {}
-  const r = productOfText(slug) || productOfText(ad.camp?.name) || productOfText(ad.adset?.name) || productOfText(ad.name);
+  const r = productOfText(slug) || productOfText(ad.camp?.name) || productOfText(ad.adset?.name) || productOfText(ad.name) || ad.acc?.prodDefault || "";
   PRODC.set(ad.id, r); return r;
 }
 const productsOfEnt = e => [...new Set((e.level === "ad" ? [e] : adsIn(e)).map(productOf).filter(Boolean))];
@@ -1204,11 +1205,41 @@ function namingOfEnt(e) {   // naming untuk campaign / ad set / iklan
 }
 const namingKeyEnt = e => namingOfEnt(e).toLowerCase().replace(/[\s_.]+/g, "");
 const accIdx = acc => ACCOUNTS.indexOf(acc);
+function winAds(ents) {
+  // hanya IKLAN yang menghasilkan purchase (cara hitung tim: iklan tanpa purchase tidak ikut dijumlah ke naming)
+  const seen = new Set(), ads = [];
+  ents.forEach(e => (e.level === "ad" ? [e] : adsIn(e)).forEach(a => { const m = AM.get(a.id) || {}; if (!seen.has(a.id) && scopeOk(a) && qOk(a) && m.purch > 0) { seen.add(a.id); ads.push(a); } }));
+  return ads;
+}
+function namingFix(ents) {
+  // sheet "Fix": TANPA akun — naming yang sama dari semua akun dijumlah jadi 1 baris, dikelompokkan per produk
+  const ads = winAds(ents), g = new Map();
+  ads.forEach(a => {
+    const label = namingOfEnt(a), k = label.toLowerCase().replace(/[\s_.]+/g, "");
+    if (!g.has(k)) g.set(k, { label, list: [] }); g.get(k).list.push(a);
+  });
+  const pOrder = p => { const i = PRODUCTS.findIndex(x => x.label === p); return i < 0 ? 999 : i; };
+  const groups = [...g.values()].map(x => {
+    const prods = [...new Set(x.list.map(productOf).filter(Boolean))];
+    const run = x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0);
+    return { ...x, prods, prod: prods[0] || "", m: sumM(x.list.map(a => AM.get(a.id))), run,
+      camps: [...new Set(run.map(a => a.camp))], accs: [...new Set(x.list.map(a => a.acc.id))] };
+  }).filter(x => x.m.purch > 0)
+    .sort((a, b) => pOrder(a.prod) - pOrder(b.prod) || winScore(b.m) - winScore(a.m));
+  const rk = new Map();   // peringkat dihitung per produk
+  return {
+    title: `Gabungan semua akun per naming · hanya iklan yang ada purchase · ${groups.length} konten · naming sama dari akun berbeda dijumlah jadi 1 · dikelompokkan per produk`,
+    head: ["Peringkat", "Naming", "Produk", "Jumlah akun", "Iklan yang jalan (ada spend)", "Campaign yang jalan", ...MCOLS.map(c => c.t)],
+    kinds: ["int", "txt", "txt", "int", "int", "int", ...MCOLS.map(c => MKIND[c.k])],
+    rows: groups.map(x => [rk.set(x.prod, (rk.get(x.prod) || 0) + 1).get(x.prod), x.label, x.prods.join(", "), x.accs.length, x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m))]),
+    total: ["", "TOTAL", "", "", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m))))],
+    dup: groups.map(x => x.accs.length > 1), dupCol: 1,
+    raws: groups.map(x => x.m), sumCols: [4, 5], countCol: 1, countWord: "naming"
+  };
+}
 function namingSummary(ents) {
   // dihitung SELALU dari level iklan (nama konten) — export dari Campaigns, Ad sets, atau Ads menghasilkan sheet Naming yang SAMA
-  const seen = new Set(), ads = [];
-  // hanya IKLAN yang menghasilkan purchase/value (cara hitung tim: iklan tanpa purchase tidak ikut dijumlah ke naming)
-  ents.forEach(e => (e.level === "ad" ? [e] : adsIn(e)).forEach(a => { const m = AM.get(a.id) || {}; if (!seen.has(a.id) && scopeOk(a) && qOk(a) && m.purch > 0) { seen.add(a.id); ads.push(a); } }));
+  const ads = winAds(ents);
   const g = new Map();
   ads.forEach(a => {
     const label = namingOfEnt(a), k = a.acc.id + "|" + label.toLowerCase().replace(/[\s_.]+/g, "");
@@ -1262,7 +1293,8 @@ function exportData() {
     rows: (rk => ents.map(e => { const vd = verdict(e); rk.set(e.acc.id, (rk.get(e.acc.id) || 0) + 1); return [rk.get(e.acc.id), e.acc.name, e.name, namingOfEnt(e), prodLabel(e), delivery(e).t, V[vd.v].label, e.budget ? Math.round(e.budget) : null, ...mv(mOf(e)), vd.why, e.level === "campaign" ? "" : e.camp.name, e.id]; }))(new Map()),
     raws: ents.map(mOf), sumCols: [7], countCol: 2, countWord: LVL[S.level][1],
     total: ["", "TOTAL", `${ents.length} ${LVL[S.level][1]}`, "", "", "", "", ents.reduce((t, e) => t + (e.budget || 0), 0) || null, ...mv(sumM(ents.map(mOf))), "", "", ""],
-    summary: namingSummary(ents)
+    summary: namingSummary(ents),
+    fix: namingFix(ents)
   };
 }
 function exportFor(accId) {   // hitung ulang khusus 1 akun (atau semua), lalu kembalikan tampilan seperti semula
@@ -1361,6 +1393,7 @@ function collectExport(target) {   // target: ID akun, array ID akun, atau koson
   const name = comboName(accs) || "kosong";
   const out = [{ name: "Data", title: `MONTERA ADS · ${name}`, d }];
   if (d.summary && d.summary.rows.length) out.push({ name: "Naming", title: `MONTERA ADS · ${name} · Naming (winning)`, d: d.summary });
+  if (d.fix && d.fix.rows.length) out.push({ name: "Fix", title: `MONTERA ADS · ${name} · Fix (gabungan semua akun)`, d: d.fix });
   const viewName = { all: "All ads", ai: "Montera AI", winning: "Winning ads", content: "Winning content", daily: "Rekap harian", check: "Cek data" }[S.view] + (["all", "ai", "winning"].includes(S.view) ? " · " + LVL[S.level][2] + "s" : "");
   const fileTag = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80)}${S.f.prod !== "all" ? "-" + String(S.f.prod).toLowerCase().replace(/[^a-z0-9]+/g, "") : ""}-${S.view === "daily" ? "rekap-harian" : S.view === "all" ? LVL[S.level][1].replace(" ", "") : S.view}-${S.from}_${S.to}`;
   return { sheets: out, tag: name, viewName, fileTag };
