@@ -148,6 +148,7 @@ $public = [
       <button class="rail-btn" title="Winning content" data-goto="content"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM10 9l5 3-5 3z"/></svg></button>
       <button class="rail-btn" title="Rekap harian" data-goto="daily"><svg viewBox="0 0 24 24"><path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4M8 14h3M8 17h6"/></svg></button>
       <a class="rail-btn" title="Laporan Harian (Shopee x CPAS)" href="laporan.php"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></a>
+      <a class="rail-btn" title="Data Ads (input harian & akun CPAS)" href="data.php"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 9h16M9 9v11M13 13h4M13 16h4"/></svg></a>
     </nav>
     <nav class="rail-nav bottom">
       <button class="rail-btn" title="Sync ulang semua akun" id="railSync"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg></button>
