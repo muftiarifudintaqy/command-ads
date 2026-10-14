@@ -320,7 +320,16 @@ body{padding-bottom:60px}
   <span class="sep"></span>
   <a href="<?= e($url(['tab' => 'akun', 'akun' => null])) ?>" class="<?= ($tab === 'akun' && !$akunAktif) ? 'on' : '' ?>">⚙️ Kelola akun</a>
 </nav>
-<script>(function () { var on = document.querySelector('#lembar a.on'); if (on) on.scrollIntoView({ inline: 'center', block: 'nearest' }); })();</script>
+<style>.lembar a{cursor:pointer;user-select:none}</style>
+<script>(function () {
+  // tab bawah jadi tombol: tanpa pratinjau alamat dari browser
+  document.querySelectorAll('#lembar a[href]').forEach(function (x) {
+    var tujuan = x.getAttribute('href'); x.removeAttribute('href'); x.setAttribute('role', 'button'); x.tabIndex = 0;
+    x.addEventListener('click', function (ev) { if (ev.metaKey || ev.ctrlKey) window.open(tujuan, '_blank'); else location.href = tujuan; });
+    x.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') location.href = tujuan; });
+  });
+  var on = document.querySelector('#lembar a.on'); if (on) on.scrollIntoView({ inline: 'center', block: 'nearest' });
+})();</script>
 <script>
 var CSRF = <?= json_encode($csrf) ?>, MERK = <?= json_encode($merk) ?>;
 // [data-live] perbarui otomatis saat ada isian baru dari sheet / orang lain (tidak saat sedang mengetik)
