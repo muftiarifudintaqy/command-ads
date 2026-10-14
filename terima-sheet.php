@@ -18,7 +18,8 @@ if (($in['jenis'] ?? '') === 'akun') {
         $tgl = (string)($b['tanggal'] ?? ''); if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $tgl)) continue;
         $v = []; foreach (['spend', 'omset', 'purchase', 'vc', 'atc'] as $k) $v[$k] = ma_angka($b[$k] ?? '');
         if (!array_filter($v, function ($x) { return $x !== null; })) continue;
-        $up->execute([$aid, $tgl, (int)round($v['spend'] ?? 0), (int)round($v['omset'] ?? 0), (int)round($v['purchase'] ?? 0), (int)round($v['vc'] ?? 0), (int)round($v['atc'] ?? 0)]);
+        $bulat = function ($x) { return $x === null ? null : (int)round($x); };
+        $up->execute([$aid, $tgl, $bulat($v['spend']), $bulat($v['omset']), $bulat($v['purchase']), $bulat($v['vc']), $bulat($v['atc'])]);
         $n++;
     }
     echo json_encode(['ok' => true, 'disimpan' => $n]); exit;

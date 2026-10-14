@@ -42,9 +42,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $aid = (int)($in['akun'] ?? 0); $tgl = (string)($in['tanggal'] ?? ''); $kol = (string)($in['kolom'] ?? '');
             if (!$aid || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $tgl) || $tgl > date('Y-m-d')) $jawab(['ok' => false, 'pesan' => 'Tanggal tidak valid']);
             if (!in_array($kol, ['spend', 'omset', 'purchase', 'vc', 'atc'], true)) $jawab(['ok' => false, 'pesan' => 'Kolom tidak valid']);
-            $nilai = (int)preg_replace('/\D/', '', (string)($in['nilai'] ?? ''));
+            $raw = trim((string)($in['nilai'] ?? '')); $nilai = $raw === '' ? null : (int)preg_replace('/\D/', '', $raw);
             $db->prepare("INSERT INTO meta_harian (akun_id, tanggal, $kol, manual) VALUES (?,?,?,1) ON DUPLICATE KEY UPDATE $kol = VALUES($kol), manual = 1")->execute([$aid, $tgl, $nilai]);
             $db->prepare("INSERT INTO log_ubah (pengguna, merek, tanggal, kolom, lama, baru) VALUES (?,?,?,?,?,?)")->execute([$user, 'akun#' . $aid, $tgl, $kol, null, (string)$nilai]);
+            $db->prepare("DELETE FROM meta_harian WHERE akun_id = ? AND tanggal = ? AND spend IS NULL AND omset IS NULL AND purchase IS NULL AND vc IS NULL AND atc IS NULL")->execute([$aid, $tgl]);
             $jawab(['ok' => true, 'jam' => date('H:i'), 'sheet' => ma_kirim_sheet_akun($aid, $tgl)]);
         }
         if ($aksi === 'akun') {
@@ -225,14 +226,26 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
   .kt2{background:#fff;border-radius:14px;overflow:hidden;min-width:250px;box-shadow:0 1px 2px rgba(16,24,40,.05),0 6px 18px rgba(16,24,40,.06)}
   .kt2 .h{background:linear-gradient(135deg,var(--w),color-mix(in srgb,var(--w) 65%,#000));color:#fff;font-weight:700;padding:9px 14px;font-size:13px}.kt2 .h small{display:block;font-weight:500;opacity:.85;font-size:11px}
   .kt2 table{width:100%;font-size:13px}.kt2 td{position:static!important;padding:6px 14px;text-align:left;color:#64748b;border-bottom:1px dashed #eef0f4;font-weight:400!important;border-right:0!important}.kt2 td:last-child{text-align:right;color:#0f172a;font-weight:700!important}
+  /* [sel-jelas] sel terlihat seperti kotak sheet */
+  table.lak tbody td{padding:3px 5px!important}
+  table.lak input.sel{border:1px solid #dfe3ea;background:#fff;border-radius:8px;padding:7px 9px;min-width:115px;box-shadow:inset 0 1px 1px rgba(15,23,42,.03)}
+  table.lak input.sel:hover:not(:disabled){border-color:#b9c2d0;background:#fff}
+  table.lak input.sel::placeholder{color:#cbd5e1}
+  table.lak input.sel:disabled{background:#f8fafc;border-color:#f1f3f7;color:#cbd5e1}
+  table.lak input.sel.oke{background:#dcfce7;border-color:#86efac}table.lak input.sel.gagal{background:#fee2e2;border-color:#fca5a5}table.lak input.sel.simpan{background:#fffbeb;border-color:#fcd34d}
+  table.lak td.h-cpp,table.lak td.h-roas,table.lak td.h-cvc,table.lak td.h-catc{color:#64748b;background:#fafbfd}
+  table.lak tbody tr:hover td{background:#f5f8ff}
+  .toast{position:fixed;right:20px;bottom:74px;z-index:50;padding:10px 16px;border-radius:12px;font-size:13px;font-weight:600;color:#fff;background:#16a34a;box-shadow:0 10px 30px rgba(0,0,0,.18);opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}
+  .toast.on{opacity:1;transform:none}.toast.salah{background:#dc2626}
   </style>
+  <div class="toast" id="toast"></div>
   <div class="ket"><a href="<?= e($url(['akun' => null])) ?>">← Semua akun</a> · <?= e($ak['act_id']) ?> · <?= $ak['sheet_gid'] ? 'tersambung ke tab sheet' : '<b>belum tersambung ke tab sheet</b>' ?> · klik angka untuk mengubah, tersimpan otomatis dan ikut ke sheet</div>
   <div class="tabel"><table class="lak">
     <thead><tr><th colspan="10"><?= e(strtoupper($ak['nama'])) ?></th></tr>
     <tr><th>Tanggal</th><th>Amount Spent</th><th>Purchases conversion value for shared items only</th><th>Purchases with shared items</th><th>CPP</th><th>Purchase ROAS for shared item</th><th>Content views with shared items</th><th>COST per VC</th><th>Adds to cart with shared items</th><th>COST per ATC</th></tr></thead>
     <tbody>
     <?php foreach (array_keys($HARI) as $tg): $r = $DHm[$tg] ?? null; $depan = $tg > date('Y-m-d') ? 'disabled' : '';
-      $sel = function ($k, $f) use ($r, $depan) { return '<td><input class="sel" data-k="' . $k . '" data-f="' . $f . '" value="' . ($r ? e($f === 'rp' ? rp((float)$r[$k]) : an((float)$r[$k])) : '') . '" ' . $depan . '></td>'; }; ?>
+      $sel = function ($k, $f) use ($r, $depan) { return '<td><input class="sel" data-k="' . $k . '" data-f="' . $f . '" placeholder="—" value="' . ($r && $r[$k] !== null ? e($f === 'rp' ? rp((float)$r[$k]) : an((float)$r[$k])) : '') . '" ' . $depan . '></td>'; }; ?>
     <tr data-t="<?= e($tg) ?>"><td><?= e($label($tg)) ?></td><?= $sel('spend', 'rp') . $sel('omset', 'rp') . $sel('purchase', 'an') ?><td class="h-cpp"></td><td class="h-roas"></td><?= $sel('vc', 'an') ?><td class="h-cvc"></td><?= $sel('atc', 'an') ?><td class="h-catc"></td></tr>
     <?php endforeach; ?>
     </tbody>
@@ -241,7 +254,8 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
   <div class="kotak2"><?= $kotak('MONTHLY', $NB[$bl] . ' ' . $th, $tt['spend'], $tt['omset'], $tt['purchase']) ?><?php if ($akhirIsi): $x = $DHm[$akhirIsi]; echo $kotak('Daily Report CPAS', $label($akhirIsi), (float)$x['spend'], (float)$x['omset'], (float)$x['purchase']); endif; ?></div>
   <script>
   (function () {
-    var AKUN = <?= (int)$akunId ?>;
+    var AKUN = <?= (int)$akunId ?>, tt = null;
+    function toast(m, ok) { var t = document.getElementById('toast'); t.textContent = m; t.className = 'toast on' + (ok ? '' : ' salah'); clearTimeout(tt); tt = setTimeout(function () { t.className = 'toast'; }, 2600); }
     function n(s) { s = String(s || '').replace(/\D/g, ''); return s === '' ? null : +s; }
     function rp(x) { return x == null || !isFinite(x) ? '' : 'Rp' + Math.round(x).toLocaleString('id-ID'); }
     function an(x) { return x == null ? '' : Math.round(x).toLocaleString('id-ID'); }
@@ -261,8 +275,8 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
       el.addEventListener('change', function () {
         var tr = el.closest('tr'), x = n(el.value); el.classList.add('simpan');
         kirim({ aksi: 'meta', akun: AKUN, tanggal: tr.dataset.t, kolom: el.dataset.k, nilai: x == null ? '' : x }).then(function (h) {
-          el.classList.remove('simpan'); el.classList.add(h.ok ? 'oke' : 'gagal'); el.title = h.ok ? 'Tersimpan ' + h.jam + ' · ' + h.sheet : h.pesan;
-          setTimeout(function () { el.classList.remove('oke'); }, 1500); if (h.ok) awal = el.value; else { el.value = awal; alert(h.pesan); } hitung(tr);
+          el.classList.remove('simpan'); el.classList.add(h.ok ? 'oke' : 'gagal'); el.title = h.ok ? 'Tersimpan ' + h.jam + ' · ' + h.sheet : h.pesan; toast(h.ok ? '✓ Tersimpan ' + h.jam + ' · ' + h.sheet : '✗ ' + h.pesan, h.ok);
+          setTimeout(function () { el.classList.remove('oke'); }, 1500); if (h.ok) awal = el.value; else { el.value = awal; } hitung(tr);
         });
       });
     });
