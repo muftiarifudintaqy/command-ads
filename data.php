@@ -35,7 +35,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ON DUPLICATE KEY UPDATE $kol = VALUES($kol), sumber = 'sistem', diubah_oleh = VALUES(diubah_oleh), diubah_at = NOW()")->execute([$mk, $tgl, $nilai, $user]);
             $db->prepare("INSERT INTO log_ubah (pengguna, merek, tanggal, kolom, lama, baru) VALUES (?,?,?,?,?,?)")
                ->execute([$user, $mk, $tgl, $kol, $lama === false ? null : (string)$lama, $nilai === null ? null : (string)$nilai]);
-            $jawab(['ok' => true, 'oleh' => $user, 'jam' => date('H:i')]);
+            $ks = $kol === 'catatan' ? '' : ma_kirim_sheet($mk, $tgl);
+            $jawab(['ok' => true, 'oleh' => $user, 'jam' => date('H:i'), 'sheet' => $ks]);
         }
         if ($aksi === 'akun') {
             $id = (int)($in['id'] ?? 0); $mk = ($in['merek'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
@@ -101,6 +102,7 @@ function ps(?float $n): string { return $n === null ? '–' : number_format($n *
 function e($s): string { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 $isi = array_values(array_filter($HARI, function ($r) { return $r['isi']; }));
 $warna = $merk === 'skinlyfe' ? '#e0483e' : '#3b6fe0';
+$q = $db->prepare("SELECT id, nama, aktif FROM akun WHERE merek = ? ORDER BY aktif DESC, urutan, id"); $q->execute([$merk]); $AKB = $q->fetchAll(); $akunAktif = (int)($_GET['akun'] ?? 0);
 $url = function (array $x) use ($merk, $tab, $bln) { return '?' . http_build_query(array_merge(['merk' => $merk, 'tab' => $tab, 'bulan' => $bln], $x)); };
 ?><!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Data Ads — Montera</title><link rel="icon" type="image/png" href="assets/montera-icon.png">
@@ -198,7 +200,7 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
 ?>
   <div class="ket"><a href="<?= e($url(['akun' => null])) ?>">← Semua akun</a> · <b><?= e($ak['nama'] ?? '') ?></b> · <?= e($ak['act_id'] ?? '') ?></div>
   <div class="tabel"><table><thead><tr><th>Tanggal</th><th>Amount spent</th><th>Omset (shared items)</th><th>Purchase</th><th>CPR</th><th>ROAS</th><th>Content views</th><th>Add to cart</th><th>Diambil</th></tr></thead><tbody>
-  <?php foreach ($DH as $r): foreach ($tt as $k => $_) $tt[$k] += $r[$k]; ?><tr><td><?= e($label($r['tanggal'])) ?></td><td><?= rp((float)$r['spend']) ?></td><td><?= rp((float)$r['omset']) ?></td><td><?= an((float)$r['purchase']) ?></td><td><?= rp(bagi((float)$r['spend'], (float)$r['purchase'])) ?></td><td><?= rs(bagi((float)$r['omset'], (float)$r['spend'])) ?></td><td><?= an((float)$r['vc']) ?></td><td><?= an((float)$r['atc']) ?></td><td class="st"><?= e($r['diambil_at'] ? date('d/m H:i', strtotime($r['diambil_at'])) : '') ?></td></tr><?php endforeach; ?>
+  <?php $DHm = []; foreach ($DH as $x) $DHm[$x['tanggal']] = $x; foreach (array_keys($HARI) as $tg): $r = $DHm[$tg] ?? ['tanggal' => $tg, 'spend' => 0, 'omset' => 0, 'purchase' => 0, 'vc' => 0, 'atc' => 0, 'diambil_at' => null]; foreach ($tt as $k => $_) $tt[$k] += $r[$k]; ?><tr><td><?= e($label($r['tanggal'])) ?></td><td><?= rp((float)$r['spend']) ?></td><td><?= rp((float)$r['omset']) ?></td><td><?= an((float)$r['purchase']) ?></td><td><?= rp(bagi((float)$r['spend'], (float)$r['purchase'])) ?></td><td><?= rs(bagi((float)$r['omset'], (float)$r['spend'])) ?></td><td><?= an((float)$r['vc']) ?></td><td><?= an((float)$r['atc']) ?></td><td class="st"><?= e($r['diambil_at'] ? date('d/m H:i', strtotime($r['diambil_at'])) : '') ?></td></tr><?php endforeach; ?>
   </tbody><tfoot><tr><td>Total</td><td><?= rp($tt['spend']) ?></td><td><?= rp($tt['omset']) ?></td><td><?= an($tt['purchase']) ?></td><td><?= rp(bagi($tt['spend'], $tt['purchase'])) ?></td><td><?= rs(bagi($tt['omset'], $tt['spend'])) ?></td><td><?= an($tt['vc']) ?></td><td><?= an($tt['atc']) ?></td><td></td></tr></tfoot></table></div>
   <?php else: ?>
   <div class="form" id="fAkun">
@@ -221,6 +223,24 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
   <?php endif; ?>
 <?php endif; ?>
 </div>
+<!-- [lembar-tab] tab bawah seperti sheet -->
+<style>
+body{padding-bottom:60px}
+.lembar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;gap:4px;overflow-x:auto;padding:8px 12px;background:#f8fafc;border-top:1px solid var(--garis);scrollbar-width:thin}
+.lembar a{flex:0 0 auto;padding:7px 13px;border-radius:9px;font-size:12px;font-weight:600;color:#334155;text-decoration:none;background:#fff;border:1px solid var(--garis);white-space:nowrap}
+.lembar a:hover{border-color:var(--w);color:var(--w)}
+.lembar a.on{background:var(--w);border-color:var(--w);color:#fff}
+.lembar a.mati{opacity:.45}.lembar .sep{flex:0 0 1px;background:var(--garis);margin:2px 4px}
+</style>
+<nav class="lembar" id="lembar">
+  <a href="<?= e($url(['tab' => 'laporan', 'akun' => null])) ?>" class="<?= $tab === 'laporan' ? 'on' : '' ?>">📊 <?= e(strtoupper($merk)) ?> SHOPEE × CPAS</a>
+  <a href="<?= e($url(['tab' => 'input', 'akun' => null])) ?>" class="<?= $tab === 'input' ? 'on' : '' ?>">✏️ Input Shopee</a>
+  <span class="sep"></span>
+  <?php foreach ($AKB as $x): ?><a href="<?= e($url(['tab' => 'akun', 'akun' => $x['id']])) ?>" class="<?= ($tab === 'akun' && $akunAktif === (int)$x['id']) ? 'on' : '' ?> <?= $x['aktif'] ? '' : 'mati' ?>"><?= e($x['nama']) ?></a><?php endforeach; ?>
+  <span class="sep"></span>
+  <a href="<?= e($url(['tab' => 'akun', 'akun' => null])) ?>" class="<?= ($tab === 'akun' && !$akunAktif) ? 'on' : '' ?>">⚙️ Kelola akun</a>
+</nav>
+<script>(function () { var on = document.querySelector('#lembar a.on'); if (on) on.scrollIntoView({ inline: 'center', block: 'nearest' }); })();</script>
 <script>
 var CSRF = <?= json_encode($csrf) ?>, MERK = <?= json_encode($merk) ?>;
 // [data-live] perbarui otomatis saat ada isian baru dari sheet / orang lain (tidak saat sedang mengetik)
@@ -245,7 +265,7 @@ document.querySelectorAll('input.inp').forEach(function (el) {
     var tr = el.closest('tr'), st = tr.querySelector('.st');
     st.className = 'st'; st.textContent = 'menyimpan…';
     kirim({ aksi: 'shopee', merek: MERK, tanggal: tr.dataset.t, kolom: el.dataset.k, nilai: el.value }).then(function (h) {
-      if (h.ok) { st.className = 'st ok'; st.textContent = '✓ ' + h.oleh + ' · ' + h.jam; awal = el.value; }
+      if (h.ok) { st.className = 'st ok'; st.textContent = '✓ ' + h.oleh + ' · ' + h.jam + (h.sheet ? ' · ' + h.sheet : ''); awal = el.value; }
       else { st.className = 'st salah'; st.textContent = h.pesan; el.value = awal; }
     }).catch(function () { st.className = 'st salah'; st.textContent = 'gagal, coba lagi'; });
   });
