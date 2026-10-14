@@ -345,6 +345,47 @@ body{padding-bottom:60px}
   });
   var on = document.querySelector('#lembar a.on'); if (on) on.scrollIntoView({ inline: 'center', block: 'nearest' });
 })();</script>
+<!-- [laser-geser] penggeser jadi garis laser tipis warna merek, muncul hanya saat digeser -->
+<style>
+html,body,.tabel,.lembar{scrollbar-width:none!important}
+html::-webkit-scrollbar,body::-webkit-scrollbar,.tabel::-webkit-scrollbar,.lembar::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}
+.laser{position:fixed;z-index:60;pointer-events:none;border-radius:2px;opacity:0;
+  background:linear-gradient(90deg,var(--w),color-mix(in srgb,var(--w) 35%,#fff),var(--w));background-size:220% 100%;
+  box-shadow:0 0 5px color-mix(in srgb,var(--w) 80%,transparent),0 0 12px color-mix(in srgb,var(--w) 40%,transparent);
+  transition:opacity .35s ease;animation:laserJalan 1.4s linear infinite}
+.laser.h{height:2px}.laser.v{width:2px;background:linear-gradient(180deg,var(--w),color-mix(in srgb,var(--w) 35%,#fff),var(--w));background-size:100% 220%}
+.laser.on{opacity:.95}
+@keyframes laserJalan{from{background-position:0 0}to{background-position:-220% -220%}}
+</style>
+<script>(function () {
+  var halaman = document.scrollingElement || document.documentElement;
+  function laser(box, sumbu) {
+    var g = document.createElement('div'), t = null; g.className = 'laser ' + sumbu; document.body.appendChild(g);
+    function ukur(tampil) {
+      var r = box === halaman ? { left: 0, top: 0, width: innerWidth, height: innerHeight, right: innerWidth, bottom: innerHeight } : box.getBoundingClientRect();
+      var total = sumbu === 'h' ? box.scrollWidth : box.scrollHeight, lihat = sumbu === 'h' ? box.clientWidth : box.clientHeight;
+      if (total <= lihat + 2 || r.width === 0) { g.classList.remove('on'); return; }
+      if (sumbu === 'h') {
+        var w = Math.max(40, r.width * lihat / total);
+        g.style.width = w + 'px'; g.style.left = (r.left + (r.width - w) * box.scrollLeft / (total - lihat)) + 'px'; g.style.top = (r.bottom - 3) + 'px';
+      } else {
+        var h = Math.max(40, r.height * lihat / total);
+        g.style.height = h + 'px'; g.style.top = (r.top + (r.height - h) * box.scrollTop / (total - lihat)) + 'px'; g.style.left = (r.right - 3) + 'px';
+      }
+      if (tampil) { g.classList.add('on'); clearTimeout(t); t = setTimeout(function () { g.classList.remove('on'); }, 1000); }
+    }
+    (box === halaman ? window : box).addEventListener('scroll', function () { ukur(true); }, { passive: true });
+    if (box !== halaman) { window.addEventListener('scroll', function () { ukur(false); }, { passive: true }); box.addEventListener('mouseenter', function () { ukur(true); }); }
+    window.addEventListener('resize', function () { ukur(false); });
+    ukur(false);
+  }
+  function pasang() {
+    laser(halaman, 'v');
+    document.querySelectorAll('.tabel').forEach(function (el) { laser(el, 'h'); laser(el, 'v'); });
+    var l = document.getElementById('lembar'); if (l) laser(l, 'h');
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', pasang); else pasang();
+})();</script>
 <script>
 var CSRF = <?= json_encode($csrf) ?>, MERK = <?= json_encode($merk) ?>;
 // [data-live] perbarui otomatis saat ada isian baru dari sheet / orang lain (tidak saat sedang mengetik)
