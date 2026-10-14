@@ -60,6 +60,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } catch (Throwable $e) { $jawab(['ok' => false, 'pesan' => $e->getMessage()]); }
 }
 
+// [data-live] tanda perubahan terakhir, dipakai halaman untuk memperbarui diri sendiri
+if (isset($_GET['ping'])) {
+    header('Content-Type: application/json');
+    $mk = ($_GET['merk'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
+    $q = $db->prepare("SELECT CONCAT(IFNULL((SELECT MAX(diubah_at) FROM shopee_harian WHERE merek = ?), ''), '|',
+        IFNULL((SELECT MAX(m.diambil_at) FROM meta_harian m JOIN akun k ON k.id = m.akun_id WHERE k.merek = ?), ''), '|', (SELECT COUNT(*) FROM akun))");
+    $q->execute([$mk, $mk]); echo json_encode(['v' => $q->fetchColumn()]); exit;
+}
 /* ===================== DATA ===================== */
 $merk = ($_GET['merk'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
 $tab = in_array($_GET['tab'] ?? '', ['laporan', 'input', 'akun'], true) ? $_GET['tab'] : 'laporan';
@@ -215,6 +223,20 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
 </div>
 <script>
 var CSRF = <?= json_encode($csrf) ?>, MERK = <?= json_encode($merk) ?>;
+// [data-live] perbarui otomatis saat ada isian baru dari sheet / orang lain (tidak saat sedang mengetik)
+(function () {
+  var versi = null, sedangIsi = false;
+  document.addEventListener('focusin', function (e) { if (e.target.matches('input,select,textarea')) sedangIsi = true; });
+  document.addEventListener('focusout', function () { sedangIsi = false; });
+  var y = sessionStorage.getItem('dataScroll'); if (y) { window.scrollTo(0, +y); sessionStorage.removeItem('dataScroll'); }
+  setInterval(function () {
+    if (document.hidden) return;
+    fetch('data.php?ping=1&merk=' + MERK, { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
+      if (versi === null) { versi = j.v; return; }
+      if (j.v !== versi && !sedangIsi) { sessionStorage.setItem('dataScroll', window.scrollY); location.reload(); }
+    }).catch(function () {});
+  }, 4000);
+})();
 function kirim(data) { return fetch('data.php', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF': CSRF }, body: JSON.stringify(data) }).then(function (r) { return r.json(); }); }
 document.querySelectorAll('input.inp').forEach(function (el) {
   var awal = el.value;
