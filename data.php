@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ON DUPLICATE KEY UPDATE $kol = VALUES($kol), sumber = 'sistem', diubah_oleh = VALUES(diubah_oleh), diubah_at = NOW()")->execute([$mk, $tgl, $nilai, $user]);
             $db->prepare("INSERT INTO log_ubah (pengguna, merek, tanggal, kolom, lama, baru) VALUES (?,?,?,?,?,?)")
                ->execute([$user, $mk, $tgl, $kol, $lama === false ? null : (string)$lama, $nilai === null ? null : (string)$nilai]);
-            $ks = $kol === 'catatan' ? '' : ma_kirim_sheet($mk, $tgl);
+            $ks = $kol === 'catatan' ? '' : ma_kirim_belakang('shopee', $mk, $tgl);
             $jawab(['ok' => true, 'oleh' => $user, 'jam' => date('H:i'), 'sheet' => $ks]);
         }
         if ($aksi === 'meta') {
@@ -46,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("INSERT INTO meta_harian (akun_id, tanggal, $kol, manual) VALUES (?,?,?,1) ON DUPLICATE KEY UPDATE $kol = VALUES($kol), manual = 1")->execute([$aid, $tgl, $nilai]);
             $db->prepare("INSERT INTO log_ubah (pengguna, merek, tanggal, kolom, lama, baru) VALUES (?,?,?,?,?,?)")->execute([$user, 'akun#' . $aid, $tgl, $kol, null, (string)$nilai]);
             $db->prepare("DELETE FROM meta_harian WHERE akun_id = ? AND tanggal = ? AND spend IS NULL AND omset IS NULL AND purchase IS NULL AND vc IS NULL AND atc IS NULL")->execute([$aid, $tgl]);
-            $jawab(['ok' => true, 'jam' => date('H:i'), 'sheet' => ma_kirim_sheet_akun($aid, $tgl)]);
+            $jawab(['ok' => true, 'jam' => date('H:i'), 'sheet' => ma_kirim_belakang('akun', (string)$aid, $tgl)]);
         }
         if ($aksi === 'akun') {
             $id = (int)($in['id'] ?? 0); $mk = ($in['merek'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
