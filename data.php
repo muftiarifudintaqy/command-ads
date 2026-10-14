@@ -38,15 +38,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $ks = $kol === 'catatan' ? '' : ma_kirim_sheet($mk, $tgl);
             $jawab(['ok' => true, 'oleh' => $user, 'jam' => date('H:i'), 'sheet' => $ks]);
         }
+        if ($aksi === 'meta') {
+            $aid = (int)($in['akun'] ?? 0); $tgl = (string)($in['tanggal'] ?? ''); $kol = (string)($in['kolom'] ?? '');
+            if (!$aid || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $tgl) || $tgl > date('Y-m-d')) $jawab(['ok' => false, 'pesan' => 'Tanggal tidak valid']);
+            if (!in_array($kol, ['spend', 'omset', 'purchase', 'vc', 'atc'], true)) $jawab(['ok' => false, 'pesan' => 'Kolom tidak valid']);
+            $nilai = (int)preg_replace('/\D/', '', (string)($in['nilai'] ?? ''));
+            $db->prepare("INSERT INTO meta_harian (akun_id, tanggal, $kol, manual) VALUES (?,?,?,1) ON DUPLICATE KEY UPDATE $kol = VALUES($kol), manual = 1")->execute([$aid, $tgl, $nilai]);
+            $db->prepare("INSERT INTO log_ubah (pengguna, merek, tanggal, kolom, lama, baru) VALUES (?,?,?,?,?,?)")->execute([$user, 'akun#' . $aid, $tgl, $kol, null, (string)$nilai]);
+            $jawab(['ok' => true, 'jam' => date('H:i'), 'sheet' => ma_kirim_sheet_akun($aid, $tgl)]);
+        }
         if ($aksi === 'akun') {
             $id = (int)($in['id'] ?? 0); $mk = ($in['merek'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
             $nama = trim((string)($in['nama'] ?? '')); $act = trim((string)($in['act_id'] ?? ''));
             if (strpos($act, 'act_') !== 0 && ctype_digit($act)) $act = 'act_' . $act;
             if ($nama === '' || !preg_match('/^act_\d{6,25}$/', $act)) $jawab(['ok' => false, 'pesan' => 'Isi nama dan ID akun iklan (angka, contoh act_1234567890).']);
             $tok = in_array($in['token'] ?? '', ['prepare', 'marketBeauty', 'glowingCantik'], true) ? $in['token'] : 'prepare';
-            $v = [$mk, $nama, $act, $tok, $mk === 'skinlyfe' ? 'skinlyfe' : 'prepare', empty($in['cpas_only']) ? 0 : 1, trim((string)($in['grup'] ?? '')) ?: null, empty($in['aktif']) ? 0 : 1];
-            if ($id) { $v[] = $id; $db->prepare("UPDATE akun SET merek=?, nama=?, act_id=?, token=?, metode=?, cpas_only=?, grup=?, aktif=? WHERE id=?")->execute($v); }
-            else { $db->prepare("INSERT INTO akun (merek, nama, act_id, token, metode, cpas_only, grup, aktif, urutan) VALUES (?,?,?,?,?,?,?,?,99)")->execute($v); $id = (int)$db->lastInsertId(); }
+            $v = [$mk, $nama, $act, $tok, $mk === 'skinlyfe' ? 'skinlyfe' : 'prepare', empty($in['cpas_only']) ? 0 : 1, trim((string)($in['grup'] ?? '')) ?: null, empty($in['aktif']) ? 0 : 1, ((int)($in['sheet_gid'] ?? 0)) ?: null];
+            if ($id) { $v[] = $id; $db->prepare("UPDATE akun SET merek=?, nama=?, act_id=?, token=?, metode=?, cpas_only=?, grup=?, aktif=?, sheet_gid=? WHERE id=?")->execute($v); }
+            else { $db->prepare("INSERT INTO akun (merek, nama, act_id, token, metode, cpas_only, grup, aktif, sheet_gid, urutan) VALUES (?,?,?,?,?,?,?,?,?,99)")->execute($v); $id = (int)$db->lastInsertId(); }
             $jawab(['ok' => true, 'id' => $id]);
         }
         if ($aksi === 'tarik') {
@@ -195,26 +204,83 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
   $q = $db->prepare("SELECT k.*, SUM(m.spend) s, SUM(m.omset) o, SUM(m.purchase) p FROM akun k LEFT JOIN meta_harian m ON m.akun_id = k.id AND m.tanggal BETWEEN ? AND ?
       WHERE k.merek = ? GROUP BY k.id ORDER BY k.aktif DESC, k.urutan, k.id"); $q->execute([$awal, $akhir, $merk]); $AK = $q->fetchAll();
   if ($akunId):
-    $q = $db->prepare("SELECT * FROM akun WHERE id = ?"); $q->execute([$akunId]); $ak = $q->fetch();
-    $q = $db->prepare("SELECT * FROM meta_harian WHERE akun_id = ? AND tanggal BETWEEN ? AND ? ORDER BY tanggal"); $q->execute([$akunId, $awal, $akhir]); $DH = $q->fetchAll(); $tt = ['spend' => 0, 'omset' => 0, 'purchase' => 0, 'vc' => 0, 'atc' => 0];
+    $q = $db->prepare("SELECT * FROM akun WHERE id = ?"); $q->execute([$akunId]); $ak = $q->fetch() ?: ['nama' => '', 'act_id' => '', 'sheet_gid' => null];
+    $q = $db->prepare("SELECT * FROM meta_harian WHERE akun_id = ? AND tanggal BETWEEN ? AND ?"); $q->execute([$akunId, $awal, $akhir]);
+    $DHm = []; foreach ($q->fetchAll() as $x) $DHm[$x['tanggal']] = $x;
+    $tt = ['spend' => 0, 'omset' => 0, 'purchase' => 0, 'vc' => 0, 'atc' => 0]; $akhirIsi = null;
+    foreach ($DHm as $tg => $x) { foreach ($tt as $k => $_) $tt[$k] += (float)$x[$k]; if ((float)$x['spend'] > 0 && ($akhirIsi === null || $tg > $akhirIsi)) $akhirIsi = $tg; }
+    $kotak = function ($judul, $sub, $sp, $om, $pu) { return '<div class="kt2"><div class="h">' . e($judul) . '<small>' . e($sub) . '</small></div><table>'
+        . '<tr><td>Cost :</td><td>' . rp($sp) . '</td></tr><tr><td>Omset :</td><td>' . rp($om) . '</td></tr><tr><td>Pesanan :</td><td>' . an($pu) . '</td></tr>'
+        . '<tr><td>CPR :</td><td>' . rp(bagi($sp, $pu)) . '</td></tr><tr><td>ROAS :</td><td>' . rs(bagi($om, $sp)) . '</td></tr></table></div>'; };
 ?>
-  <div class="ket"><a href="<?= e($url(['akun' => null])) ?>">← Semua akun</a> · <b><?= e($ak['nama'] ?? '') ?></b> · <?= e($ak['act_id'] ?? '') ?></div>
-  <div class="tabel"><table><thead><tr><th>Tanggal</th><th>Amount spent</th><th>Omset (shared items)</th><th>Purchase</th><th>CPR</th><th>ROAS</th><th>Content views</th><th>Add to cart</th><th>Diambil</th></tr></thead><tbody>
-  <?php $DHm = []; foreach ($DH as $x) $DHm[$x['tanggal']] = $x; foreach (array_keys($HARI) as $tg): $r = $DHm[$tg] ?? ['tanggal' => $tg, 'spend' => 0, 'omset' => 0, 'purchase' => 0, 'vc' => 0, 'atc' => 0, 'diambil_at' => null]; foreach ($tt as $k => $_) $tt[$k] += $r[$k]; ?><tr><td><?= e($label($r['tanggal'])) ?></td><td><?= rp((float)$r['spend']) ?></td><td><?= rp((float)$r['omset']) ?></td><td><?= an((float)$r['purchase']) ?></td><td><?= rp(bagi((float)$r['spend'], (float)$r['purchase'])) ?></td><td><?= rs(bagi((float)$r['omset'], (float)$r['spend'])) ?></td><td><?= an((float)$r['vc']) ?></td><td><?= an((float)$r['atc']) ?></td><td class="st"><?= e($r['diambil_at'] ? date('d/m H:i', strtotime($r['diambil_at'])) : '') ?></td></tr><?php endforeach; ?>
-  </tbody><tfoot><tr><td>Total</td><td><?= rp($tt['spend']) ?></td><td><?= rp($tt['omset']) ?></td><td><?= an($tt['purchase']) ?></td><td><?= rp(bagi($tt['spend'], $tt['purchase'])) ?></td><td><?= rs(bagi($tt['omset'], $tt['spend'])) ?></td><td><?= an($tt['vc']) ?></td><td><?= an($tt['atc']) ?></td><td></td></tr></tfoot></table></div>
+  <style>
+  table.lak th{white-space:normal;min-width:110px;font-size:11px;line-height:1.25}
+  table.lak thead tr:first-child th{background:var(--w)!important;color:#fff;font-size:13px;letter-spacing:.06em;border-bottom:0}
+  table.lak thead tr:nth-child(2) th{top:34px}
+  input.sel{width:100%;min-width:105px;border:1px solid transparent;background:transparent;text-align:right;font:inherit;padding:4px 6px;border-radius:6px;font-variant-numeric:tabular-nums;color:inherit}
+  input.sel:hover:not(:disabled){border-color:#e2e8f0;background:#fff}
+  input.sel:focus{outline:none;border-color:var(--w);background:#fff;box-shadow:0 0 0 3px color-mix(in srgb,var(--w) 18%,transparent)}
+  input.sel.simpan{background:#fffbeb}input.sel.oke{background:#dcfce7}input.sel.gagal{background:#fee2e2}
+  .kotak2{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px}
+  .kt2{background:#fff;border-radius:14px;overflow:hidden;min-width:250px;box-shadow:0 1px 2px rgba(16,24,40,.05),0 6px 18px rgba(16,24,40,.06)}
+  .kt2 .h{background:linear-gradient(135deg,var(--w),color-mix(in srgb,var(--w) 65%,#000));color:#fff;font-weight:700;padding:9px 14px;font-size:13px}.kt2 .h small{display:block;font-weight:500;opacity:.85;font-size:11px}
+  .kt2 table{width:100%;font-size:13px}.kt2 td{position:static!important;padding:6px 14px;text-align:left;color:#64748b;border-bottom:1px dashed #eef0f4;font-weight:400!important;border-right:0!important}.kt2 td:last-child{text-align:right;color:#0f172a;font-weight:700!important}
+  </style>
+  <div class="ket"><a href="<?= e($url(['akun' => null])) ?>">← Semua akun</a> · <?= e($ak['act_id']) ?> · <?= $ak['sheet_gid'] ? 'tersambung ke tab sheet' : '<b>belum tersambung ke tab sheet</b>' ?> · klik angka untuk mengubah, tersimpan otomatis dan ikut ke sheet</div>
+  <div class="tabel"><table class="lak">
+    <thead><tr><th colspan="10"><?= e(strtoupper($ak['nama'])) ?></th></tr>
+    <tr><th>Tanggal</th><th>Amount Spent</th><th>Purchases conversion value for shared items only</th><th>Purchases with shared items</th><th>CPP</th><th>Purchase ROAS for shared item</th><th>Content views with shared items</th><th>COST per VC</th><th>Adds to cart with shared items</th><th>COST per ATC</th></tr></thead>
+    <tbody>
+    <?php foreach (array_keys($HARI) as $tg): $r = $DHm[$tg] ?? null; $depan = $tg > date('Y-m-d') ? 'disabled' : '';
+      $sel = function ($k, $f) use ($r, $depan) { return '<td><input class="sel" data-k="' . $k . '" data-f="' . $f . '" value="' . ($r ? e($f === 'rp' ? rp((float)$r[$k]) : an((float)$r[$k])) : '') . '" ' . $depan . '></td>'; }; ?>
+    <tr data-t="<?= e($tg) ?>"><td><?= e($label($tg)) ?></td><?= $sel('spend', 'rp') . $sel('omset', 'rp') . $sel('purchase', 'an') ?><td class="h-cpp"></td><td class="h-roas"></td><?= $sel('vc', 'an') ?><td class="h-cvc"></td><?= $sel('atc', 'an') ?><td class="h-catc"></td></tr>
+    <?php endforeach; ?>
+    </tbody>
+    <tfoot><tr><td><?= e($NB[$bl] . ' ' . $th) ?></td><td><?= rp($tt['spend']) ?></td><td><?= rp($tt['omset']) ?></td><td><?= an($tt['purchase']) ?></td><td><?= rp(bagi($tt['spend'], $tt['purchase'])) ?></td><td><?= rs(bagi($tt['omset'], $tt['spend'])) ?></td><td><?= an($tt['vc']) ?></td><td><?= rp(bagi($tt['spend'], $tt['vc'])) ?></td><td><?= an($tt['atc']) ?></td><td><?= rp(bagi($tt['spend'], $tt['atc'])) ?></td></tr></tfoot>
+  </table></div>
+  <div class="kotak2"><?= $kotak('MONTHLY', $NB[$bl] . ' ' . $th, $tt['spend'], $tt['omset'], $tt['purchase']) ?><?php if ($akhirIsi): $x = $DHm[$akhirIsi]; echo $kotak('Daily Report CPAS', $label($akhirIsi), (float)$x['spend'], (float)$x['omset'], (float)$x['purchase']); endif; ?></div>
+  <script>
+  (function () {
+    var AKUN = <?= (int)$akunId ?>;
+    function n(s) { s = String(s || '').replace(/\D/g, ''); return s === '' ? null : +s; }
+    function rp(x) { return x == null || !isFinite(x) ? '' : 'Rp' + Math.round(x).toLocaleString('id-ID'); }
+    function an(x) { return x == null ? '' : Math.round(x).toLocaleString('id-ID'); }
+    function rs(x) { return x == null || !isFinite(x) ? '' : x.toFixed(2).replace('.', ','); }
+    function hitung(tr) {
+      var g = function (k) { var el = tr.querySelector('[data-k="' + k + '"]'); return el ? n(el.value) : null; }, s = g('spend'), o = g('omset'), p = g('purchase'), v = g('vc'), a = g('atc');
+      tr.querySelector('.h-cpp').textContent = s != null && p ? rp(s / p) : ''; tr.querySelector('.h-roas').textContent = s && o != null ? rs(o / s) : '';
+      tr.querySelector('.h-cvc').textContent = s != null && v ? rp(s / v) : ''; tr.querySelector('.h-catc').textContent = s != null && a ? rp(s / a) : '';
+    }
+    document.querySelectorAll('table.lak tbody tr').forEach(hitung);
+    document.querySelectorAll('input.sel').forEach(function (el) {
+      var awal = el.value;
+      el.addEventListener('focus', function () { var x = n(el.value); el.value = x == null ? '' : String(x); el.select(); });
+      el.addEventListener('blur', function () { var x = n(el.value); el.value = el.dataset.f === 'rp' ? rp(x) : an(x); });
+      el.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); var tr = el.closest('tr').nextElementSibling, nx = tr && tr.querySelector('[data-k="' + el.dataset.k + '"]'); el.blur(); if (nx && !nx.disabled) nx.focus(); } });
+      el.addEventListener('input', function () { hitung(el.closest('tr')); });
+      el.addEventListener('change', function () {
+        var tr = el.closest('tr'), x = n(el.value); el.classList.add('simpan');
+        kirim({ aksi: 'meta', akun: AKUN, tanggal: tr.dataset.t, kolom: el.dataset.k, nilai: x == null ? '' : x }).then(function (h) {
+          el.classList.remove('simpan'); el.classList.add(h.ok ? 'oke' : 'gagal'); el.title = h.ok ? 'Tersimpan ' + h.jam + ' · ' + h.sheet : h.pesan;
+          setTimeout(function () { el.classList.remove('oke'); }, 1500); if (h.ok) awal = el.value; else { el.value = awal; alert(h.pesan); } hitung(tr);
+        });
+      });
+    });
+  })();
+  </script>
   <?php else: ?>
   <div class="form" id="fAkun">
     <b style="margin-right:6px">Tambah / ubah akun</b>
     <input type="hidden" id="aId" value="0">
     <input id="aNama" placeholder="Nama akun (mis. PREPARE CPAS - HK 6)" style="min-width:260px">
     <input id="aAct" placeholder="ID akun iklan (act_123…)" style="min-width:200px">
-    <input id="aGrup" placeholder="Grup (mis. Prepare CPAS)">
+    <input id="aGrup" placeholder="Grup (mis. Prepare CPAS)"><input id="aGid" placeholder="gid tab di sheet (opsional)" style="width:190px">
     <select id="aTok"><option value="prepare">Token Prepare / Skinlyfe</option><option value="glowingCantik">Token Glowing Cantik</option><option value="marketBeauty">Token Market Beauty</option></select>
     <label><input type="checkbox" id="aCpas"> hanya katalog</label><label><input type="checkbox" id="aAktif" checked> aktif</label>
     <button class="btn" id="aSimpan">Simpan</button><button class="btn abu" id="aBatal" type="button">Batal</button><span class="st" id="aPesan"></span>
   </div>
   <div class="tabel"><table><thead><tr><th>Akun</th><th>Grup</th><th>ID akun</th><th>Spend bulan ini</th><th>Omset</th><th>Purchase</th><th>ROAS</th><th>Status</th><th></th></tr></thead><tbody>
-  <?php foreach ($AK as $r): ?><tr class="<?= $r['aktif'] ? '' : 'mati' ?>" data-a='<?= e(json_encode(['id' => (int)$r['id'], 'nama' => $r['nama'], 'act_id' => $r['act_id'], 'grup' => $r['grup'], 'token' => $r['token'], 'cpas_only' => (int)$r['cpas_only'], 'aktif' => (int)$r['aktif']])) ?>'>
+  <?php foreach ($AK as $r): ?><tr class="<?= $r['aktif'] ? '' : 'mati' ?>" data-a='<?= e(json_encode(['id' => (int)$r['id'], 'nama' => $r['nama'], 'act_id' => $r['act_id'], 'grup' => $r['grup'], 'token' => $r['token'], 'cpas_only' => (int)$r['cpas_only'], 'aktif' => (int)$r['aktif'], 'sheet_gid' => $r['sheet_gid']])) ?>'>
     <td><a class="akun" href="<?= e($url(['akun' => $r['id']])) ?>"><?= e($r['nama']) ?></a></td><td style="text-align:left"><?= e($r['grup']) ?></td><td style="text-align:left"><?= e($r['act_id']) ?></td>
     <td><?= rp((float)$r['s']) ?></td><td><?= rp((float)$r['o']) ?></td><td><?= an((float)$r['p']) ?></td><td><?= rs(bagi((float)$r['o'], (float)$r['s'])) ?></td>
     <td><?= $r['aktif'] ? '<span class="pl g1">aktif</span>' : '<span class="pl g3">nonaktif</span>' ?></td>
@@ -272,12 +338,12 @@ document.querySelectorAll('input.inp').forEach(function (el) {
 });
 var f = document.getElementById('fAkun');
 if (f) {
-  var $ = function (i) { return document.getElementById(i); }, isiForm = function (a) { $('aId').value = a.id || 0; $('aNama').value = a.nama || ''; $('aAct').value = a.act_id || ''; $('aGrup').value = a.grup || ''; $('aTok').value = a.token || 'prepare'; $('aCpas').checked = !!a.cpas_only; $('aAktif').checked = a.aktif === undefined ? true : !!a.aktif; };
+  var $ = function (i) { return document.getElementById(i); }, isiForm = function (a) { $('aId').value = a.id || 0; $('aNama').value = a.nama || ''; $('aAct').value = a.act_id || ''; $('aGrup').value = a.grup || ''; $('aTok').value = a.token || 'prepare'; $('aCpas').checked = !!a.cpas_only; $('aAktif').checked = a.aktif === undefined ? true : !!a.aktif; $('aGid').value = a.sheet_gid || ''; };
   document.querySelectorAll('button.ubah').forEach(function (b) { b.onclick = function () { isiForm(JSON.parse(b.closest('tr').dataset.a)); window.scrollTo(0, 0); }; });
   $('aBatal').onclick = function () { isiForm({}); $('aPesan').textContent = ''; };
   $('aSimpan').onclick = function () {
     $('aPesan').textContent = 'menyimpan…';
-    kirim({ aksi: 'akun', id: +$('aId').value, merek: MERK, nama: $('aNama').value, act_id: $('aAct').value, grup: $('aGrup').value, token: $('aTok').value, cpas_only: $('aCpas').checked ? 1 : 0, aktif: $('aAktif').checked ? 1 : 0 })
+    kirim({ aksi: 'akun', id: +$('aId').value, merek: MERK, nama: $('aNama').value, act_id: $('aAct').value, grup: $('aGrup').value, token: $('aTok').value, cpas_only: $('aCpas').checked ? 1 : 0, aktif: $('aAktif').checked ? 1 : 0, sheet_gid: $('aGid').value })
       .then(function (h) { if (!h.ok) { $('aPesan').textContent = h.pesan; return; } var baru = !+$('aId').value; $('aPesan').textContent = baru ? 'Tersimpan, menarik data bulan ini…' : 'Tersimpan';
         if (baru) kirim({ aksi: 'tarik', id: h.id }).then(function (x) { alert(x.pesan); location.reload(); }); else location.reload(); });
   };
