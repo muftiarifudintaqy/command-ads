@@ -320,7 +320,22 @@ body{padding-bottom:60px}
   <span class="sep"></span>
   <a href="<?= e($url(['tab' => 'akun', 'akun' => null])) ?>" class="<?= ($tab === 'akun' && !$akunAktif) ? 'on' : '' ?>">⚙️ Kelola akun</a>
 </nav>
-<style>.lembar a{cursor:pointer;user-select:none}</style>
+<style>.lembar a{cursor:pointer;user-select:none}
+/* [garis-geser] penggeser tab: garis biru tipis, jelas hanya saat disentuh/digeser */
+.lembar{scrollbar-width:thin;scrollbar-color:transparent transparent;padding-bottom:9px!important}
+.lembar:hover,.lembar.geser{scrollbar-color:color-mix(in srgb,var(--w) 70%,transparent) transparent}
+.lembar::-webkit-scrollbar{height:3px}
+.lembar::-webkit-scrollbar-track{background:transparent}
+.lembar::-webkit-scrollbar-thumb{background:transparent;border-radius:3px}
+.lembar:hover::-webkit-scrollbar-thumb,.lembar.geser::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--w) 70%,transparent)}
+</style>
+<script>(function () {
+  var l = document.getElementById('lembar'), t = null; if (!l) return;
+  // roda mouse biasa menggeser tab ke kiri/kanan
+  l.addEventListener('wheel', function (ev) { if (Math.abs(ev.deltaY) > Math.abs(ev.deltaX)) { l.scrollLeft += ev.deltaY; ev.preventDefault(); } }, { passive: false });
+  // garis biru tampil sebentar saat digeser
+  l.addEventListener('scroll', function () { l.classList.add('geser'); clearTimeout(t); t = setTimeout(function () { l.classList.remove('geser'); }, 900); });
+})();</script>
 <script>(function () {
   // tab bawah jadi tombol: tanpa pratinjau alamat dari browser
   document.querySelectorAll('#lembar a[href]').forEach(function (x) {
