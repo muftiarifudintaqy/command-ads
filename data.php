@@ -104,7 +104,7 @@ if (isset($_GET['ping'])) {
 }
 /* ===================== DATA ===================== */
 $merk = ($_GET['merk'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
-$tab = in_array($_GET['tab'] ?? '', ['laporan', 'input', 'akun'], true) ? $_GET['tab'] : 'laporan';
+$tab = in_array($_GET['tab'] ?? '', ['laporan', 'tahun', 'input', 'akun'], true) ? $_GET['tab'] : 'laporan';
 $bln = preg_match('/^\d{4}-\d{2}$/', (string)($_GET['bulan'] ?? '')) ? (string)$_GET['bulan'] : date('Y-m');
 [$th, $bl] = array_map('intval', explode('-', $bln));
 $awal = sprintf('%04d-%02d-01', $th, $bl); $jml = (int)date('t', strtotime($awal)); $akhir = sprintf('%04d-%02d-%02d', $th, $bl, $jml);
@@ -200,7 +200,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
 <div class="atas">
   <a class="kembali" href="index.php">← Dashboard</a><h1>Data Ads</h1>
   <div class="tg"><a href="<?= e('?' . http_build_query(['merk' => 'prepare', 'tab' => $tab, 'bulan' => $bln])) ?>" class="<?= $merk === 'prepare' ? 'on' : '' ?>">Prepare</a><a href="<?= e('?' . http_build_query(['merk' => 'skinlyfe', 'tab' => $tab, 'bulan' => $bln])) ?>" class="<?= $merk === 'skinlyfe' ? 'on' : '' ?>">Skinlyfe</a></div>
-  <div class="tab"><a href="<?= e($url(['tab' => 'laporan'])) ?>" class="<?= $tab === 'laporan' ? 'on' : '' ?>">Laporan</a><a href="<?= e($url(['tab' => 'input'])) ?>" class="<?= $tab === 'input' ? 'on' : '' ?>">Input Shopee</a><a href="<?= e($url(['tab' => 'akun', 'akun' => null])) ?>" class="<?= $tab === 'akun' ? 'on' : '' ?>">Akun CPAS</a></div>
+  <div class="tab"><a href="<?= e($url(['tab' => 'laporan'])) ?>" class="<?= $tab === 'laporan' ? 'on' : '' ?>">Laporan</a><a href="<?= e($url(['tab' => 'tahun'])) ?>" class="<?= $tab === 'tahun' ? 'on' : '' ?>">Tahunan</a><a href="<?= e($url(['tab' => 'input'])) ?>" class="<?= $tab === 'input' ? 'on' : '' ?>">Input Shopee</a><a href="<?= e($url(['tab' => 'akun', 'akun' => null])) ?>" class="<?= $tab === 'akun' ? 'on' : '' ?>">Akun CPAS</a></div>
   <form method="get"><input type="hidden" name="merk" value="<?= e($merk) ?>"><input type="hidden" name="tab" value="<?= e($tab) ?>"><input type="month" name="bulan" value="<?= e($bln) ?>" onchange="this.form.submit()"></form>
   <span class="kanan">Masuk sebagai <b><?= e($user) ?></b> · <a href="laporan.php?merk=<?= e($merk) ?>&bulan=<?= e($bln) ?>">versi sheet</a></span>
 </div>
@@ -254,6 +254,46 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
     <?php if ($isi): ?><tfoot><tr><td><?= e($NB[$bl] . ' ' . $th) ?></td><td><?= rp($TOT['sc']) ?></td><td><?= ps(bagi($TOT['sc'], $TOT['ca'])) ?></td><td><?= rp($TOT['so']) ?></td><td><?= an($TOT['sp']) ?></td><td><?= rp(bagi($TOT['sc'], $TOT['sp'])) ?></td><td><?= rs($avgS) ?></td>
       <td><?= rp($TOT['mc']) ?></td><td><?= rp($TOT['mo']) ?></td><td><?= an($TOT['mp']) ?></td><td><?= rp(bagi($TOT['mc'], $TOT['mp'])) ?></td><td><?= rs($avgM) ?></td><td><?= an($TOT['ma']) ?></td>
       <td><?= rp($TOT['ca']) ?></td><td><?= rp(bagi($TOT['ca'], $TOT['sp'])) ?></td><td><?= rs($avgA) ?></td></tr></tfoot><?php endif; ?>
+  </table></div>
+
+<?php elseif ($tab === 'tahun'):
+  $thn = (int)($_GET['tahun'] ?? date('Y')); if ($thn < 2020 || $thn > (int)date('Y')) $thn = (int)date('Y');
+  $ambilTahun = function ($y) use ($db, $merk) {
+    $o = []; for ($i = 1; $i <= 12; $i++) $o[$i] = ['sc' => 0, 'so' => 0, 'sp' => 0, 'mc' => 0, 'mo' => 0, 'mp' => 0];
+    $q = $db->prepare("SELECT MONTH(tanggal) b, SUM(cost) sc, SUM(omset) so, SUM(pesanan) sp FROM shopee_harian WHERE merek = ? AND YEAR(tanggal) = ? GROUP BY b"); $q->execute([$merk, $y]);
+    foreach ($q->fetchAll() as $r) { $o[(int)$r['b']]['sc'] = (float)$r['sc']; $o[(int)$r['b']]['so'] = (float)$r['so']; $o[(int)$r['b']]['sp'] = (float)$r['sp']; }
+    $q = $db->prepare("SELECT MONTH(m.tanggal) b, SUM(m.spend) mc, SUM(m.omset) mo, SUM(m.purchase) mp FROM meta_harian m JOIN akun k ON k.id = m.akun_id WHERE k.merek = ? AND YEAR(m.tanggal) = ? GROUP BY b"); $q->execute([$merk, $y]);
+    foreach ($q->fetchAll() as $r) { $o[(int)$r['b']]['mc'] = (float)$r['mc']; $o[(int)$r['b']]['mo'] = (float)$r['mo']; $o[(int)$r['b']]['mp'] = (float)$r['mp']; }
+    return $o;
+  };
+  $Y = $ambilTahun($thn); $P = $ambilTahun($thn - 1); $sampai = $thn == (int)date('Y') ? (int)date('n') : 12;
+  $jumlah = function ($arr) use ($sampai) { $t = ['sc' => 0, 'so' => 0, 'sp' => 0, 'mc' => 0, 'mo' => 0, 'mp' => 0]; for ($i = 1; $i <= $sampai; $i++) foreach ($t as $k => $_) $t[$k] += $arr[$i][$k]; return $t; };
+  $tY = $jumlah($Y); $tP = $jumlah($P);
+  $dlt = function ($x, $y) { if (!$y || $x === null) return '<span class="kosong">—</span>'; $p = ($x - $y) / abs($y) * 100; return '<span class="' . ($p >= 0 ? 'up' : 'dn') . '" style="margin:0">' . ($p >= 0 ? '▲' : '▼') . ' ' . number_format(abs($p), 1, ',', '.') . '%</span>'; };
+  $romi = function ($r) { return bagi($r['so'], $r['sc'] + $r['mc']); };
+  $per = $sampai < 12 ? 'Jan–' . substr($NB[$sampai], 0, 3) : 'setahun';
+?>
+  <div class="alat"><div class="ket" style="margin:0">Ringkasan <b><?= e(ucfirst($merk)) ?> <?= $thn ?></b> dibanding <b><?= $thn - 1 ?></b> (periode sama: <?= e($per) ?>)</div>
+    <form method="get" class="alat-kanan"><input type="hidden" name="merk" value="<?= e($merk) ?>"><input type="hidden" name="tab" value="tahun">
+      <select name="tahun" onchange="this.form.submit()" style="padding:7px 10px;border:1px solid var(--garis);border-radius:10px;font:inherit"><?php for ($y = (int)date('Y'); $y >= 2024; $y--): ?><option value="<?= $y ?>" <?= $y === $thn ? 'selected' : '' ?>><?= $y ?></option><?php endfor; ?></select></form></div>
+  <div class="kartu">
+    <div class="k"><div class="t">Omset Shopee <?= $thn ?></div><div class="b"><?= rp($tY['so']) ?></div><div class="s"><?= $thn - 1 ?>: <?= rp($tP['so']) ?> · <?= $dlt($tY['so'], $tP['so']) ?></div></div>
+    <div class="k"><div class="t">Pesanan Shopee</div><div class="b"><?= an($tY['sp']) ?></div><div class="s"><?= $thn - 1 ?>: <?= an($tP['sp']) ?> · <?= $dlt($tY['sp'], $tP['sp']) ?></div></div>
+    <div class="k"><div class="t">Daily Cost All</div><div class="b"><?= rp($tY['sc'] + $tY['mc']) ?></div><div class="s"><?= $thn - 1 ?>: <?= rp($tP['sc'] + $tP['mc']) ?> · <?= $dlt($tY['sc'] + $tY['mc'], $tP['sc'] + $tP['mc']) ?></div></div>
+    <div class="k"><div class="t">Daily Roas All / ROMI</div><div class="b"><?= rs($romi($tY)) ?></div><div class="s"><?= $thn - 1 ?>: <?= rs($romi($tP)) ?> · <?= $dlt($romi($tY), $romi($tP)) ?></div></div>
+  </div>
+  <div class="tabel"><table>
+    <thead><tr><th></th><th colspan="4">SHOPEE</th><th colspan="3">CPAS META</th><th colspan="2">Daily All Platform</th><th colspan="2">vs <?= $thn - 1 ?></th></tr>
+    <tr><th>Bulan</th><th>Cost</th><th>Omset</th><th>Pesanan</th><th>ROAS</th><th>Cost</th><th>Omset</th><th>ROAS</th><th>Daily Cost All</th><th>Daily Roas All / ROMI</th><th>Omset Shopee <?= $thn - 1 ?></th><th>Perubahan</th></tr></thead>
+    <tbody><?php for ($i = 1; $i <= 12; $i++): $r = $Y[$i]; $p = $P[$i]; $ada = $r['sc'] || $r['so'] || $r['mc']; $kos = function ($ok, $v) { return $ok ? $v : '<span class="kosong">—</span>'; }; ?>
+    <tr class="<?= $ada ? '' : 'baris-kosong' ?>">
+      <td><a class="akun" href="<?= e('?' . http_build_query(['merk' => $merk, 'tab' => 'laporan', 'bulan' => sprintf('%04d-%02d', $thn, $i)])) ?>"><?= e($NB[$i]) ?></a></td>
+      <td><?= $kos($ada, rp($r['sc'])) ?></td><td><?= $kos($ada, rp($r['so'])) ?></td><td><?= $kos($ada, an($r['sp'])) ?></td><td><?= $kos($ada, rs(bagi($r['so'], $r['sc']))) ?></td>
+      <td><?= $kos($ada, rp($r['mc'])) ?></td><td><?= $kos($ada, rp($r['mo'])) ?></td><td><?= $kos($ada, rs(bagi($r['mo'], $r['mc']))) ?></td>
+      <td><?= $kos($ada, rp($r['sc'] + $r['mc'])) ?></td><td><?= $kos($ada, rs($romi($r))) ?></td>
+      <td><?= $kos((bool)$p['so'], rp($p['so'])) ?></td><td><?= $ada ? $dlt($r['so'], $p['so']) : '<span class="kosong">—</span>' ?></td>
+    </tr><?php endfor; ?></tbody>
+    <tfoot><tr><td>Total <?= e($per) ?></td><td><?= rp($tY['sc']) ?></td><td><?= rp($tY['so']) ?></td><td><?= an($tY['sp']) ?></td><td><?= rs(bagi($tY['so'], $tY['sc'])) ?></td><td><?= rp($tY['mc']) ?></td><td><?= rp($tY['mo']) ?></td><td><?= rs(bagi($tY['mo'], $tY['mc'])) ?></td><td><?= rp($tY['sc'] + $tY['mc']) ?></td><td><?= rs($romi($tY)) ?></td><td><?= rp($tP['so']) ?></td><td><?= $dlt($tY['so'], $tP['so']) ?></td></tr></tfoot>
   </table></div>
 
 <?php elseif ($tab === 'input'): ?>
