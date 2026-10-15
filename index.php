@@ -5,7 +5,7 @@ require __DIR__ . '/auth.php';
 ma_session_start();
 $C = require __DIR__ . (is_file(__DIR__ . '/config.php') ? '/config.php' : '/config.example.php');   // laptop: config.php · server: env var
 if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(16));
-$v = @filemtime(__DIR__ . '/app.js') . @filemtime(__DIR__ . '/style.css');   // versi file (anti-cache)
+$v = @filemtime(__DIR__ . '/app.js?v=1792052235') . @filemtime(__DIR__ . '/style.css');   // versi file (anti-cache)
 
 // ---- login (aktif kalau app_password ATAU login_users diisi di config.php) ----
 $loginUsers = $C['login_users'] ?? [];
@@ -255,6 +255,6 @@ $public = [
   </aside>
 
   <script>window.ADS_CONFIG = <?= json_encode($public, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;</script>
-  <script src="app.js?v=<?= $v ?>"></script>
+  <script src="app.js?v=1792052235"></script>
 </body>
 </html>

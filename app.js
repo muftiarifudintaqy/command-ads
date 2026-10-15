@@ -1547,7 +1547,7 @@ function thinkingHTML() {
   return `<div class="msg bot thinking"><div class="th-h">${MLOGO}<b>${AI_NAME} sedang berpikir</b><span class="muted sm">${Math.floor(sec)} dtk</span></div>
     <ol class="th-steps">${steps.map((t, i) => `<li class="${i < cur ? "done" : i === cur ? "now" : ""}">${i < cur ? "✓" : i === cur ? "<span class='spin-dot'></span>" : "•"} ${esc(t)}</li>`).join("")}</ol></div>`;
 }
-const saveChat = () => store.set("ac_chat", CHAT.msgs.slice(-30));
+let saveChat = () => store.set("ac_chat", CHAT.msgs.slice(-30));
 // Analisis data hanya kalau pertanyaannya soal iklan; sapaan/obrolan biasa dijawab santai & cepat tanpa membaca data
 const AD_RE = /(iklan|\bads?\b|campaign|kampanye|ad ?set|roas|\bcpp\b|\bcpa\b|\bctr\b|\bcpc\b|\bcpm\b|hook|hold rate|spend|budget|boncos|rugi|scale|winning|konten|creative|kreatif|funnel|tofu|mofu|bofu|shopee|purchase|pembelian|\batc\b|add to cart|checkout|akun|\bhk ?\d|prepare|skinlyfe|selow|glowing|matikan|nyalakan|pause|naikkan|turunkan|performa|omzet|conversion|frequency|impres|reach|audience|\bmeta\b|facebook|instagram|rekap|analis|naming|\bvc\b|content view|hari ini|kemarin|minggu ini|bulan ini)/i;
 const CASUAL_SYS = () => `Kamu ${AI_NAME}, asisten AI tim iklan Montera yang santai dan ramah, seperti teman ngobrol. Jawab singkat, natural, bahasa Indonesia santai (boleh gaul sedikit), sesuai yang ditanya saja. JANGAN membahas data iklan, angka, atau analisis kecuali user menanyakannya. Kalau cuma disapa ("p", "halo"), balas sapaan singkat 1 kalimat dan tawarkan bantuan. Pertanyaan umum (bukan soal iklan) jawab seperti AI biasa.
@@ -1626,7 +1626,7 @@ setInterval(() => { if (S.to === ymd(new Date()) && !document.hidden) loadAll(fa
 setInterval(() => { if (!S.busy) renderHeader(); }, 30000);
 
 // ---------- [riwayat-chat] percakapan tersimpan di server, bisa dibuka lagi & dihapus ----------
-(function () {
+try { (function () {
   const HARI = 24 * 3600 * 1000;
   let simpanT = null;
   CHAT.id = store.get("ac_chat_id", null);
@@ -1702,4 +1702,4 @@ setInterval(() => { if (!S.busy) renderHeader(); }, 30000);
     };
   }
   tRiw.addEventListener("click", buka);
-})();
+})(); } catch (e) { console.error('[riwayat-chat]', e); }
