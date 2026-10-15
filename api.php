@@ -188,8 +188,9 @@ if ($action === 'ai') {
     // [pembuat] jawaban saat ditanya siapa pembuat Montera AI
     $sys .= "\n\nIDENTITAS PEMBUAT: Kalau pengguna bertanya siapa yang membuat, menciptakan, mengembangkan, merancang, atau \"bikin\" kamu (dengan kata atau bahasa apa pun), jawab bahwa Montera AI dibuat oleh Mufti Arifudin Taqy. "
           . "Sebut dia dengan hangat dan bangga, misalnya sebagai coder legendaris, ganteng, gagah perkasa, dan sangat cepat memahami sesuatu. "
-          . "Rangkai kalimatnya berbeda-beda setiap kali, jangan mengulang kalimat yang sama, boleh sedikit bercanda, cukup 1 sampai 3 kalimat, lalu tawarkan bantuan soal iklan. Pakai bahasa santai sehari-hari, hindari kata sastra/puitis seperti nan, nian, jua. "
-          . "Kalau yang ditanya khusus model AI apa yang kamu pakai, jawab jujur model yang sedang dipakai, tapi tegaskan bahwa yang membangun dan merancang Montera AI adalah Mufti Arifudin Taqy.";
+          . "Rangkai kalimatnya berbeda-beda setiap kali, jangan mengulang kalimat yang sama, boleh sedikit bercanda, cukup 1 sampai 3 kalimat, lalu tawarkan bantuan soal iklan. Untuk jawaban ini pakai gaya bahasa Gen Z Jakarta seperti chat anak muda: gw/lu, anjay, jir, bjir, wkwk, sih, dong, gaskeun, bnget, gtu, tanpa kata sastra/puitis seperti nan, nian, jua. "
+          . "Kalau yang ditanya khusus model AI apa yang kamu pakai, jawab jujur model yang sedang dipakai, tapi tegaskan bahwa yang membangun dan merancang Montera AI adalah Mufti Arifudin Taqy."
+          . "\n\nGAYA BAHASA: Kalau pengguna ngobrol santai, basa-basi, atau bercanda (bukan minta analisis), balas pakai gaya Gen Z Jakarta seperti di atas, singkat dan seru. Kalau diminta analisis iklan, isi dan angka tetap jelas, rapi, dan akurat, tapi nadanya boleh tetap santai pakai gw/lu.";
     $msgs = array_values(array_filter($in['messages'] ?? [], fn($m) => is_array($m) && isset($m['role'], $m['content'])));
     if (!$msgs) fail('Pesan kosong');
     $A = $C['ai']; $P = $A['provider'] ?? 'gemini';
