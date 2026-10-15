@@ -1624,3 +1624,82 @@ render();
 loadAll(false);
 setInterval(() => { if (S.to === ymd(new Date()) && !document.hidden) loadAll(false); }, CFG.autoRefreshMinutes * 60000);
 setInterval(() => { if (!S.busy) renderHeader(); }, 30000);
+
+// ---------- [riwayat-chat] percakapan tersimpan di server, bisa dibuka lagi & dihapus ----------
+(function () {
+  const HARI = 24 * 3600 * 1000;
+  let simpanT = null;
+  CHAT.id = store.get("ac_chat_id", null);
+  const simpanLokal = saveChat;
+  saveChat = function () {
+    simpanLokal(); store.set("ac_chat_t", Date.now());
+    clearTimeout(simpanT);
+    simpanT = setTimeout(() => {
+      if (!CHAT.msgs || !CHAT.msgs.length) return;
+      api("chat_simpan", { id: CHAT.id, msgs: CHAT.msgs }).then(r => { if (r && r.id) { CHAT.id = r.id; store.set("ac_chat_id", r.id); } }).catch(() => {});
+    }, 700);
+  };
+  function baru() { CHAT.msgs = []; CHAT.id = null; store.set("ac_chat_id", null); simpanLokal(); renderChat(); }
+  // tidak aktif > 24 jam → percakapan baru (yang lama tetap di riwayat)
+  if (CHAT.msgs && CHAT.msgs.length && Date.now() - store.get("ac_chat_t", Date.now()) > HARI) baru();
+
+  const reset = document.getElementById("chatReset"); if (!reset) return;
+  const tBaru = reset.cloneNode(true); tBaru.title = "Percakapan baru"; tBaru.textContent = "＋"; reset.replaceWith(tBaru);
+  tBaru.addEventListener("click", baru);
+  const tRiw = tBaru.cloneNode(true); tRiw.id = "chatRiwayat"; tRiw.title = "Riwayat percakapan"; tRiw.textContent = "🕘"; tBaru.before(tRiw);
+
+  const st = document.createElement("style");
+  st.textContent = `.rw-pop{position:fixed;z-index:9999;width:340px;max-height:62vh;display:flex;flex-direction:column;background:var(--card,#fff);color:inherit;border:1px solid rgba(127,127,127,.18);border-radius:16px;box-shadow:0 24px 60px rgba(15,23,42,.22);animation:rwIn .18s cubic-bezier(.2,.9,.3,1.1);overflow:hidden}
+  @keyframes rwIn{from{opacity:0;transform:translateY(-6px) scale(.98)}to{opacity:1;transform:none}}
+  .rw-h{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;font-weight:700;border-bottom:1px solid rgba(127,127,127,.14)}
+  .rw-h button{border:0;border-radius:9px;padding:6px 10px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;background:linear-gradient(135deg,#7c3aed,#db2777);color:#fff}
+  .rw-isi{overflow:auto;padding:6px 6px 10px}.rw-g{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;opacity:.55;padding:10px 10px 4px}
+  .rw-i{display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:10px;cursor:pointer}.rw-i:hover{background:rgba(124,58,237,.08)}.rw-i.on{background:rgba(124,58,237,.14)}
+  .rw-i .j{flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rw-i small{opacity:.5;font-size:11px}
+  .rw-x{border:0;background:transparent;cursor:pointer;opacity:.45;font-size:13px;padding:3px 6px;border-radius:7px}.rw-x:hover{opacity:1;background:rgba(220,38,38,.1)}
+  .rw-x.yakin{opacity:1;background:#dc2626;color:#fff;font-size:11px;font-weight:700}.rw-kosong{padding:22px;text-align:center;opacity:.55;font-size:13px}`;
+  document.head.appendChild(st);
+
+  let pop = null;
+  function tutup() { if (pop) { pop.remove(); pop = null; document.removeEventListener("mousedown", luar, true); } }
+  function luar(e) { if (pop && !pop.contains(e.target) && e.target !== tRiw) tutup(); }
+  function kelompok(t) {
+    const d = new Date(String(t).replace(" ", "T")), h = new Date(); h.setHours(0, 0, 0, 0);
+    const sel = (h - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / HARI;
+    return sel <= 0 ? "Hari ini" : sel <= 1 ? "Kemarin" : sel <= 7 ? "7 hari terakhir" : "Lebih lama";
+  }
+  async function buka() {
+    if (pop) return tutup();
+    const r = tRiw.getBoundingClientRect();
+    pop = document.createElement("div"); pop.className = "rw-pop";
+    pop.style.top = (r.bottom + 8) + "px"; pop.style.left = Math.max(8, Math.min(window.innerWidth - 348, r.right - 340)) + "px";
+    pop.innerHTML = `<div class="rw-h">Riwayat percakapan<button type="button" data-rwbaru>＋ Baru</button></div><div class="rw-isi"><div class="rw-kosong">memuat…</div></div>`;
+    document.body.appendChild(pop); setTimeout(() => document.addEventListener("mousedown", luar, true), 0);
+    pop.querySelector("[data-rwbaru]").onclick = () => { baru(); tutup(); };
+    let d = []; try { d = (await api("chat_daftar", {})).daftar || []; } catch {}
+    const isi = pop && pop.querySelector(".rw-isi"); if (!isi) return;
+    if (!d.length) { isi.innerHTML = `<div class="rw-kosong">Belum ada percakapan tersimpan.</div>`; return; }
+    let g = "", h = "";
+    d.forEach(c => {
+      const k = kelompok(c.diubah_at); if (k !== g) { g = k; h += `<div class="rw-g">${k}</div>`; }
+      const jam = String(c.diubah_at).slice(11, 16), tgl = String(c.diubah_at).slice(8, 10) + "/" + String(c.diubah_at).slice(5, 7);
+      h += `<div class="rw-i ${+c.id === +CHAT.id ? "on" : ""}" data-rwid="${c.id}"><span class="j">${esc(c.judul)}</span><small>${k === "Hari ini" || k === "Kemarin" ? jam : tgl}</small><button class="rw-x" type="button" data-rwhapus="${c.id}" title="Hapus percakapan">🗑️</button></div>`;
+    });
+    isi.innerHTML = h;
+    isi.onclick = async e => {
+      const x = e.target.closest("[data-rwhapus]");
+      if (x) {
+        e.stopPropagation();
+        if (!x.classList.contains("yakin")) { x.classList.add("yakin"); x.textContent = "Hapus?"; return; }
+        const id = +x.dataset.rwhapus; const row = x.closest(".rw-i"); row.style.transition = "opacity .2s"; row.style.opacity = 0;
+        try { await api("chat_hapus", { id }); } catch {}
+        setTimeout(() => row.remove(), 200); if (+CHAT.id === id) baru();
+        return;
+      }
+      const it = e.target.closest("[data-rwid]"); if (!it) return;
+      try { const r = await api("chat_buka", { id: +it.dataset.rwid }); CHAT.msgs = r.msgs || []; CHAT.id = r.id; store.set("ac_chat_id", r.id); simpanLokal(); store.set("ac_chat_t", Date.now()); renderChat(); } catch {}
+      tutup();
+    };
+  }
+  tRiw.addEventListener("click", buka);
+})();

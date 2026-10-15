@@ -182,6 +182,32 @@ if ($action === 'gsheet') {
     out(['url' => (string)($j['url'] ?? '')]);
 }
 
+/* ---------- riwayat percakapan Montera AI (tersimpan di server per pengguna) ---------- */
+if (in_array($action, ['chat_daftar', 'chat_buka', 'chat_simpan', 'chat_hapus'], true)) {
+    $e = []; foreach (@file('/etc/montera-ads-db.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $l) if (strpos($l, '=') !== false) { [$k, $v] = explode('=', $l, 2); $e[trim($k)] = trim($v, " \t\"'"); }
+    $pdo = new PDO('mysql:host=' . ($e['DB_HOST'] ?? 'localhost') . ';dbname=' . ($e['DB_NAME'] ?? 'montera_ads') . ';charset=utf8mb4', $e['DB_USER'] ?? '', $e['DB_PASS'] ?? '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    $siapa = (string)($_SESSION['ac_user'] ?? 'admin');
+    if ($action === 'chat_daftar') {
+        $q = $pdo->prepare("SELECT id, judul, diubah_at FROM ai_chat WHERE pengguna = ? ORDER BY diubah_at DESC LIMIT 200"); $q->execute([$siapa]);
+        out(['daftar' => $q->fetchAll()]);
+    }
+    $id = (int)($in['id'] ?? 0);
+    if ($action === 'chat_buka') {
+        $q = $pdo->prepare("SELECT pesan FROM ai_chat WHERE id = ? AND pengguna = ?"); $q->execute([$id, $siapa]); $p = $q->fetchColumn();
+        if ($p === false) fail('Percakapan tidak ditemukan', 404);
+        out(['id' => $id, 'msgs' => json_decode((string)$p, true) ?: []]);
+    }
+    if ($action === 'chat_hapus') { $pdo->prepare("DELETE FROM ai_chat WHERE id = ? AND pengguna = ?")->execute([$id, $siapa]); out(['ok' => true]); }
+    $msgs = is_array($in['msgs'] ?? null) ? $in['msgs'] : [];
+    if (!$msgs) out(['id' => $id]);
+    $judul = ''; foreach ($msgs as $m) if (($m['role'] ?? '') === 'user' && trim((string)($m['content'] ?? '')) !== '') { $judul = trim(preg_replace('/\s+/', ' ', (string)$m['content'])); break; }
+    $judul = mb_substr($judul !== '' ? $judul : 'Percakapan', 0, 110);
+    $js = json_encode($msgs, JSON_UNESCAPED_UNICODE);
+    if ($id) { $q = $pdo->prepare("UPDATE ai_chat SET pesan = ?, judul = ?, diubah_at = NOW() WHERE id = ? AND pengguna = ?"); $q->execute([$js, $judul, $id, $siapa]); if ($q->rowCount() || $pdo->query("SELECT 1 FROM ai_chat WHERE id = " . $id)->fetchColumn()) out(['id' => $id]); }
+    $pdo->prepare("INSERT INTO ai_chat (pengguna, judul, pesan) VALUES (?,?,?)")->execute([$siapa, $judul, $js]);
+    out(['id' => (int)$pdo->lastInsertId()]);
+}
+
 /* ---------- 3. AI analis ---------- */
 if ($action === 'ai') {
     $sys  = (string)($in['system'] ?? '');
