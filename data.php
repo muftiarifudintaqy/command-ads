@@ -172,6 +172,27 @@ tfoot td{position:sticky;bottom:0;background:color-mix(in srgb,var(--w) 9%,#fff)
 .form{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:#fff;padding:12px 14px;border-radius:14px;margin-bottom:12px;box-shadow:0 1px 2px rgba(16,24,40,.05),0 6px 18px rgba(16,24,40,.06)}
 .form input,.form select{padding:7px 9px;border:1px solid var(--garis);border-radius:9px;font:inherit}
 a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.mati{opacity:.45}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* [segar] tampilan modern */
+body{font-family:'Inter',-apple-system,Segoe UI,Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;
+  background:radial-gradient(1100px 520px at 0% -10%,color-mix(in srgb,var(--w) 9%,transparent),transparent 70%),radial-gradient(900px 480px at 100% 0%,color-mix(in srgb,var(--w) 5%,transparent),transparent 70%),#f6f7fb;background-attachment:fixed}
+.atas{background:rgba(255,255,255,.82)!important;backdrop-filter:saturate(180%) blur(14px);-webkit-backdrop-filter:saturate(180%) blur(14px);border-bottom:1px solid rgba(15,23,42,.06)!important}
+.atas h1{font-weight:800;letter-spacing:-.02em}
+.tg a,.tab a,.btn,.lembar a{transition:background .18s,color .18s,box-shadow .18s,transform .18s}
+.btn{box-shadow:0 1px 2px rgba(15,23,42,.08)}.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px color-mix(in srgb,var(--w) 25%,transparent)}.btn.abu:hover{background:#e6eaf1;box-shadow:0 2px 8px rgba(15,23,42,.08)}
+.k,.kt2,.lc-kt{transition:transform .2s ease,box-shadow .2s ease}.k:hover,.kt2:hover{transform:translateY(-2px);box-shadow:0 2px 4px rgba(16,24,40,.05),0 14px 30px rgba(16,24,40,.09)}
+.k .b{letter-spacing:-.02em}
+.tabel{border-radius:16px!important;box-shadow:0 1px 2px rgba(16,24,40,.04),0 12px 32px rgba(16,24,40,.06)!important}
+th{letter-spacing:.01em}
+.form{border:1px solid rgba(15,23,42,.06)}
+input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--w) 18%,transparent)}
+.isi{animation:muncul .45s cubic-bezier(.2,.8,.2,1) both}
+@keyframes muncul{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.lembar{background:rgba(255,255,255,.88)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.alat{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:2px 2px 12px}.alat-kanan{display:flex;gap:8px}
 </style></head><body>
 <div class="atas">
   <a class="kembali" href="index.php">← Dashboard</a><h1>Data Ads</h1>
@@ -189,7 +210,29 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
   $pl = function (?float $v, ?float $rata) { if ($v === null || !$rata) return rs($v); $c = $v >= $rata ? 'g1' : ($v >= $rata * 0.85 ? 'g2' : 'g3'); return '<span class="pl ' . $c . '">' . rs($v) . '</span>'; };
 ?>
   <?php if ($a): ?>
-  <div class="ket">Hari terakhir terisi: <b><?= e($label($a['t'])) ?></b> · dibanding hari sebelumnya</div>
+  <?php $rk = '*Laporan ' . ucfirst($merk) . ' — ' . $label($a['t']) . "*\n"
+      . 'Omset Shopee: ' . rp($a['so']) . "\n" . 'Pesanan: ' . an($a['sp']) . "\n" . 'ROAS Shopee: ' . rs(bagi($a['so'], $a['sc'])) . "\n"
+      . 'Omset CPAS Meta: ' . rp($a['mo']) . ' · ROAS ' . rs(bagi($a['mo'], $a['mc'])) . "\n"
+      . 'Daily Cost All: ' . rp($a['ca']) . "\n" . 'Daily CPR All: ' . rp(bagi($a['ca'], $a['sp'])) . "\n" . 'Daily Roas All / ROMI: ' . rs($romi($a)) . "\n\n"
+      . '*Total ' . $NB[$bl] . ' ' . $th . "*\n" . 'Omset Shopee: ' . rp($TOT['so']) . "\n" . 'Pesanan: ' . an($TOT['sp']) . "\n"
+      . 'Daily Cost All: ' . rp($TOT['ca']) . "\n" . 'Daily Roas All / ROMI: ' . rs($avgA); ?>
+  <div class="alat"><div class="ket" style="margin:0">Hari terakhir terisi: <b><?= e($label($a['t'])) ?></b> · dibanding hari sebelumnya</div>
+    <div class="alat-kanan"><button class="btn abu" id="bSalin" type="button">📋 Salin ringkasan</button><button class="btn abu" id="bCsv" type="button">⬇️ Unduh Excel</button></div></div>
+  <script>
+  (function () {
+    var RK = <?= json_encode($rk, JSON_UNESCAPED_UNICODE) ?>, NAMA = <?= json_encode('Laporan ' . ucfirst($merk) . ' ' . $NB[$bl] . ' ' . $th) ?>;
+    document.getElementById('bSalin').onclick = function () {
+      (navigator.clipboard ? navigator.clipboard.writeText(RK) : Promise.reject()).then(function () { kabar('Ringkasan sudah disalin. Tinggal tempel di WhatsApp.', 'Tersalin'); }, function () { kabar(RK, 'Salin teks ini'); });
+    };
+    document.getElementById('bCsv').onclick = function () {
+      var t = document.querySelector('.tabel table'); if (!t) return;
+      var baris = [], ambil = function (tr) { baris.push(Array.prototype.map.call(tr.children, function (c) { return '"' + c.textContent.trim().replace(/"/g, '""') + '"'; }).join(';')); };
+      var h = t.querySelectorAll('thead tr'); if (h.length) ambil(h[h.length - 1]);
+      t.querySelectorAll('tbody tr, tfoot tr').forEach(ambil);
+      var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + baris.join('\r\n')], { type: 'text/csv;charset=utf-8' })); a.download = NAMA + '.csv'; a.click();
+    };
+  })();
+  </script>
   <div class="kartu">
     <div class="k"><div class="t">Omset Shopee</div><div class="b"><?= rp($a['so']) ?><?= $dl($a['so'], $b['so'] ?? null) ?></div><div class="s"><?= an($a['sp']) ?> pesanan · ROAS <?= rs(bagi($a['so'], $a['sc'])) ?></div></div>
     <div class="k"><div class="t">Omset CPAS Meta</div><div class="b"><?= rp($a['mo']) ?><?= $dl($a['mo'], $b['mo'] ?? null) ?></div><div class="s"><?= an($a['mp']) ?> purchase · ROAS <?= rs(bagi($a['mo'], $a['mc'])) ?></div></div>
@@ -301,9 +344,15 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
     var $ = function (i) { return document.getElementById(i); }, actLama = <?= json_encode((string)($ak['act_id'] ?? '')) ?>;
     if (/[?&]baru=1/.test(location.search)) { $('sNama').focus(); $('sNama').select(); }
     $('sHapus').onclick = function () {
-      if (!confirm('Hapus akun "' + $('sNama').value + '"?\n\nTab akun ini di sheet juga ikut terhapus. Data Meta-nya bisa ditarik ulang kalau akun ditambahkan lagi.')) return;
-      $('sPesan').textContent = 'menghapus…';
-      kirim({ aksi: 'hapus_akun', id: <?= (int)$akunId ?> }).then(function (h) { if (!h.ok) { $('sPesan').textContent = h.pesan; return; } location.href = location.pathname + '?merk=' + MERK + '&tab=akun'; });
+      tanya({ judul: 'Hapus akun ini?', pesan: '"' + $('sNama').value + '" beserta tab-nya di sheet akan dihapus.\nData Meta bisa ditarik ulang kapan saja kalau akun ditambahkan lagi.', ok: 'Hapus', bahaya: true }).then(function (ya) {
+        if (!ya) return;
+        $('sPesan').textContent = 'menghapus…'; var isi = document.querySelector('.isi'); isi.style.transition = 'opacity .35s, transform .35s';
+        kirim({ aksi: 'hapus_akun', id: <?= (int)$akunId ?> }).then(function (h) {
+          if (!h.ok) { $('sPesan').textContent = h.pesan; return; }
+          isi.style.opacity = 0; isi.style.transform = 'translateY(8px)';
+          setTimeout(function () { location.href = location.pathname + '?merk=' + MERK + '&tab=akun'; }, 330);
+        });
+      });
     };
     $('sSimpan').onclick = function () {
       $('sPesan').textContent = 'menyimpan…';
@@ -466,12 +515,48 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,.tabel::-webkit-scrollbar,.lemba
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', pasang); else pasang();
 })();</script>
+<div class="mdl" id="mdl" hidden><div class="mdl-bg"></div><div class="mdl-kotak" role="dialog" aria-modal="true">
+  <div class="mdl-ikon" id="mdlIkon"></div><h3 id="mdlJudul"></h3><p id="mdlPesan"></p>
+  <div class="mdl-tombol"><button class="btn abu" id="mdlBatal" type="button">Batal</button><button class="btn" id="mdlOk" type="button">OK</button></div></div></div>
+<style>
+.mdl{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center}.mdl[hidden]{display:none}
+.mdl-bg{position:absolute;inset:0;background:rgba(15,23,42,.32);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);animation:mdlBg .2s ease both}
+.mdl-kotak{position:relative;width:min(430px,92vw);background:#fff;border-radius:20px;padding:22px 22px 18px;box-shadow:0 30px 70px rgba(15,23,42,.28);animation:mdlIn .26s cubic-bezier(.2,.9,.3,1.15) both}
+.mdl-ikon{width:46px;height:46px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:22px;background:color-mix(in srgb,var(--w) 12%,#fff);margin-bottom:12px}
+.mdl.bahaya .mdl-ikon{background:#fee2e2}.mdl.bahaya #mdlOk{background:#dc2626}
+.mdl h3{margin:0 0 6px;font-size:17px;font-weight:700;letter-spacing:-.01em}.mdl p{margin:0 0 18px;color:#475569;font-size:14px;line-height:1.55}
+.mdl-tombol{display:flex;gap:8px;justify-content:flex-end}
+.mdl.tutup .mdl-kotak{animation:mdlOut .16s ease forwards}.mdl.tutup .mdl-bg{animation:mdlBgOut .16s ease forwards}
+@keyframes mdlIn{from{opacity:0;transform:translateY(12px) scale(.95)}to{opacity:1;transform:none}}@keyframes mdlOut{to{opacity:0;transform:translateY(8px) scale(.97)}}
+@keyframes mdlBg{from{opacity:0}}@keyframes mdlBgOut{to{opacity:0}}
+</style>
+<script>
+(function () {
+  var m = document.getElementById('mdl');
+  function buka(o) {
+    return new Promise(function (res) {
+      m.className = 'mdl' + (o.bahaya ? ' bahaya' : ''); m.hidden = false;
+      document.getElementById('mdlIkon').textContent = o.ikon || (o.bahaya ? '🗑️' : '✅');
+      document.getElementById('mdlJudul').textContent = o.judul || '';
+      document.getElementById('mdlPesan').innerHTML = String(o.pesan || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>');
+      var ok = document.getElementById('mdlOk'), bt = document.getElementById('mdlBatal');
+      ok.textContent = o.ok || 'OK'; bt.style.display = o.batal === false ? 'none' : ''; bt.textContent = o.batal || 'Batal';
+      function selesai(v) { m.classList.add('tutup'); document.removeEventListener('keydown', kunci); setTimeout(function () { m.hidden = true; m.classList.remove('tutup'); }, 160); res(v); }
+      function kunci(e) { if (e.key === 'Escape') selesai(false); else if (e.key === 'Enter') { e.preventDefault(); selesai(true); } }
+      ok.onclick = function () { selesai(true); }; bt.onclick = function () { selesai(false); }; m.querySelector('.mdl-bg').onclick = function () { selesai(false); };
+      document.addEventListener('keydown', kunci); setTimeout(function () { ok.focus(); }, 60);
+    });
+  }
+  window.tanya = buka;
+  window.kabar = function (pesan, judul) { return buka({ judul: judul || 'Selesai', pesan: pesan, batal: false, ikon: '💬' }); };
+})();
+</script>
 <script>
 var CSRF = <?= json_encode($csrf) ?>, MERK = <?= json_encode($merk) ?>;
 function tabBaru() {
   var b = document.getElementById('tabBaru'); if (b.dataset.jalan) return; b.dataset.jalan = 1; b.textContent = '…';
   kirim({ aksi: 'tab_baru', merek: MERK }).then(function (h) {
-    if (!h.ok) { alert(h.pesan); b.textContent = '＋'; delete b.dataset.jalan; return; }
+    if (!h.ok) { kabar(h.pesan, 'Belum bisa'); b.textContent = '＋'; delete b.dataset.jalan; return; }
     location.href = location.pathname + '?merk=' + MERK + '&tab=akun&bulan=<?= e($bln) ?>&akun=' + h.id + '&baru=1';
   }).catch(function () { b.textContent = '＋'; delete b.dataset.jalan; });
 }
@@ -513,7 +598,7 @@ if (f) {
       .then(function (h) { if (!h.ok) { $('aPesan').textContent = h.pesan; return; } var baru = !+$('aId').value; $('aPesan').textContent = baru ? 'Tersimpan, menarik data bulan ini…' : 'Tersimpan';
         if (baru) kirim({ aksi: 'tarik', id: h.id }).then(function (x) { alert((h.tab ? h.tab + '\n' : '') + x.pesan + '\n\nJangan lupa: tambahkan tab "' + $('aNama').value + '" ke rumus total CPAS di tab SHOPEE X CPAS.'); location.href = location.pathname + '?merk=' + MERK + '&tab=akun&akun=' + h.id; }); else location.reload(); });
   };
-  document.querySelectorAll('button.tarik').forEach(function (b) { b.onclick = function () { b.textContent = 'menarik…'; b.disabled = true; kirim({ aksi: 'tarik', id: JSON.parse(b.closest('tr').dataset.a).id }).then(function (x) { alert(x.ok ? x.pesan : x.pesan); location.reload(); }); }; });
+  document.querySelectorAll('button.tarik').forEach(function (b) { b.onclick = function () { b.textContent = 'menarik…'; b.disabled = true; kirim({ aksi: 'tarik', id: JSON.parse(b.closest('tr').dataset.a).id }).then(function (x) { kabar(x.pesan, x.ok ? 'Data ditarik' : 'Belum bisa').then(function () { location.reload(); }); }); }; });
 }
 </script>
 </body></html>
