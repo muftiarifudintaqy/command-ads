@@ -216,19 +216,12 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
       . '*Total ' . $NB[$bl] . ' ' . $th . "*\n" . 'Omset Shopee: ' . rp($TOT['so']) . "\n" . 'Pesanan: ' . an($TOT['sp']) . "\n"
       . 'Daily Cost All: ' . rp($TOT['ca']) . "\n" . 'Daily Roas All / ROMI: ' . rs($avgA); ?>
   <div class="alat"><div class="ket" style="margin:0">Hari terakhir terisi: <b><?= e($label($a['t'])) ?></b> · dibanding hari sebelumnya</div>
-    <div class="alat-kanan"><button class="btn abu" id="bSalin" type="button">📋 Salin ringkasan</button><button class="btn abu" id="bCsv" type="button">⬇️ Unduh Excel</button></div></div>
+    <div class="alat-kanan"><button class="btn abu" id="bSalin" type="button">📋 Salin ringkasan</button></div></div>
   <script>
   (function () {
     var RK = <?= json_encode($rk, JSON_UNESCAPED_UNICODE) ?>, NAMA = <?= json_encode('Laporan ' . ucfirst($merk) . ' ' . $NB[$bl] . ' ' . $th) ?>;
     document.getElementById('bSalin').onclick = function () {
       (navigator.clipboard ? navigator.clipboard.writeText(RK) : Promise.reject()).then(function () { kabar('Ringkasan sudah disalin. Tinggal tempel di WhatsApp.', 'Tersalin'); }, function () { kabar(RK, 'Salin teks ini'); });
-    };
-    document.getElementById('bCsv').onclick = function () {
-      var t = document.querySelector('.tabel table'); if (!t) return;
-      var baris = [], ambil = function (tr) { baris.push(Array.prototype.map.call(tr.children, function (c) { return '"' + c.textContent.trim().replace(/"/g, '""') + '"'; }).join(';')); };
-      var h = t.querySelectorAll('thead tr'); if (h.length) ambil(h[h.length - 1]);
-      t.querySelectorAll('tbody tr, tfoot tr').forEach(ambil);
-      var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + baris.join('\r\n')], { type: 'text/csv;charset=utf-8' })); a.download = NAMA + '.csv'; a.click();
     };
   })();
   </script>
