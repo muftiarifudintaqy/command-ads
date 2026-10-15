@@ -48,6 +48,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("DELETE FROM meta_harian WHERE akun_id = ? AND tanggal = ? AND spend IS NULL AND omset IS NULL AND purchase IS NULL AND vc IS NULL AND atc IS NULL")->execute([$aid, $tgl]);
             $jawab(['ok' => true, 'jam' => date('H:i'), 'sheet' => ma_kirim_belakang('akun', (string)$aid, $tgl)]);
         }
+        if ($aksi === 'hapus_akun') {
+            $q = $db->prepare("SELECT * FROM akun WHERE id = ?"); $q->execute([(int)($in['id'] ?? 0)]); $a = $q->fetch();
+            if (!$a) $jawab(['ok' => false, 'pesan' => 'Akun tidak ditemukan']);
+            $db->prepare("DELETE FROM meta_harian WHERE akun_id = ?")->execute([$a['id']]);
+            $db->prepare("DELETE FROM akun WHERE id = ?")->execute([$a['id']]);
+            $db->prepare("INSERT INTO log_ubah (pengguna, merek, tanggal, kolom, lama, baru) VALUES (?,?,CURDATE(),'hapus_akun',?,NULL)")->execute([$user, $a['merek'], substr($a['nama'] . ' ' . $a['act_id'], 0, 40)]);
+            $ks = !empty($a['sheet_gid']) ? ma_post_sheet(['jenis' => 'hapus_tab', 'merek' => $a['merek'], 'gid' => (int)$a['sheet_gid'], 'nama_lama' => $a['nama']]) : '';
+            $jawab(['ok' => true, 'sheet' => $ks]);
+        }
         if ($aksi === 'tab_baru') {
             $mk = ($in['merek'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
             $q = $db->prepare("SELECT nama FROM akun WHERE merek = ? AND nama LIKE 'Akun Baru%'"); $q->execute([$mk]); $ada = array_column($q->fetchAll(), 'nama');
@@ -184,14 +193,14 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
   <div class="kartu">
     <div class="k"><div class="t">Omset Shopee</div><div class="b"><?= rp($a['so']) ?><?= $dl($a['so'], $b['so'] ?? null) ?></div><div class="s"><?= an($a['sp']) ?> pesanan · ROAS <?= rs(bagi($a['so'], $a['sc'])) ?></div></div>
     <div class="k"><div class="t">Omset CPAS Meta</div><div class="b"><?= rp($a['mo']) ?><?= $dl($a['mo'], $b['mo'] ?? null) ?></div><div class="s"><?= an($a['mp']) ?> purchase · ROAS <?= rs(bagi($a['mo'], $a['mc'])) ?></div></div>
-    <div class="k"><div class="t">Total Cost Iklan</div><div class="b"><?= rp($a['ca']) ?><?= $dl($a['ca'], $b['ca'] ?? null, true) ?></div><div class="s">Shopee <?= rp($a['sc']) ?> · Meta <?= rp($a['mc']) ?></div></div>
-    <div class="k"><div class="t">ROAS All (ROMI)</div><div class="b"><?= rs($romi($a)) ?><?= $dl($romi($a), $romi($b)) ?></div><div class="s">CPR all <?= rp(bagi($a['ca'], $a['sp'])) ?></div></div>
+    <div class="k"><div class="t">Daily Cost All</div><div class="b"><?= rp($a['ca']) ?><?= $dl($a['ca'], $b['ca'] ?? null, true) ?></div><div class="s">Shopee <?= rp($a['sc']) ?> · Meta <?= rp($a['mc']) ?></div></div>
+    <div class="k"><div class="t">Daily Roas All / ROMI</div><div class="b"><?= rs($romi($a)) ?><?= $dl($romi($a), $romi($b)) ?></div><div class="s">Daily CPR All <?= rp(bagi($a['ca'], $a['sp'])) ?></div></div>
   </div>
-  <div class="ket">Total <?= e($NB[$bl] . ' ' . $th) ?>: Omset Shopee <b><?= rp($TOT['so']) ?></b> · Omset Meta <b><?= rp($TOT['mo']) ?></b> · Cost <b><?= rp($TOT['ca']) ?></b> · ROAS All <b><?= rs($avgA) ?></b> · <?= an($TOT['sp']) ?> pesanan · rata-rata omset Shopee/hari <b><?= rp(bagi($TOT['so'], (float)$TOT['n'])) ?></b></div>
+  <div class="ket">Total <?= e($NB[$bl] . ' ' . $th) ?>: Omset Shopee <b><?= rp($TOT['so']) ?></b> · Omset Meta <b><?= rp($TOT['mo']) ?></b> · Cost <b><?= rp($TOT['ca']) ?></b> · Daily Roas All / ROMI <b><?= rs($avgA) ?></b> · <?= an($TOT['sp']) ?> pesanan · rata-rata omset Shopee/hari <b><?= rp(bagi($TOT['so'], (float)$TOT['n'])) ?></b></div>
   <?php else: ?><div class="ket">Belum ada data bulan ini.</div><?php endif; ?>
   <div class="tabel"><table>
-    <thead><tr><th></th><th colspan="6">Shopee</th><th colspan="6">CPAS Meta</th><th colspan="3">Daily All Platform</th></tr>
-    <tr><th>Tanggal</th><th>Cost</th><th>% Shopee Ads</th><th>Omset</th><th>Pesanan</th><th>CPR</th><th>ROAS</th><th>Cost</th><th>Omset</th><th>Purchase</th><th>CPR</th><th>ROAS</th><th>Add to cart</th><th>Cost All</th><th>CPR All</th><th>ROAS All / ROMI</th></tr></thead>
+    <thead><tr><th></th><th colspan="6">SHOPEE</th><th colspan="6">CPAS META</th><th colspan="3">Daily All Platform</th></tr>
+    <tr><th>Tanggal</th><th>Cost</th><th>Presentase Shopee Ads</th><th>Omset</th><th>Pesanan</th><th>CPR</th><th>ROAS</th><th>Cost</th><th>Omset</th><th>Purchases with shared items</th><th>CPR</th><th>ROAS</th><th>Adds to cart with shared items</th><th>Daily Cost All</th><th>Daily CPR All</th><th>Daily Roas All / ROMI</th></tr></thead>
     <tbody><?php foreach ($isi as $r): ?><tr>
       <td><?= e($label($r['t'])) ?></td><td><?= rp($r['sc']) ?></td><td><?= ps(bagi($r['sc'], $r['ca'])) ?></td><td><?= rp($r['so']) ?></td><td><?= an($r['sp']) ?></td><td><?= rp(bagi($r['sc'], $r['sp'])) ?></td><td><?= $pl(bagi($r['so'], $r['sc']), $avgS) ?></td>
       <td><?= rp($r['mc']) ?></td><td><?= rp($r['mo']) ?></td><td><?= an($r['mp']) ?></td><td><?= rp(bagi($r['mc'], $r['mp'])) ?></td><td><?= $pl(bagi($r['mo'], $r['mc']), $avgM) ?></td><td><?= an($r['ma']) ?></td>
@@ -202,18 +211,40 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
   </table></div>
 
 <?php elseif ($tab === 'input'): ?>
-  <div class="ket">Isi angka dari <b>Seller Center</b>. Tersimpan otomatis saat pindah kotak. Kalau hari itu sudah diisi di sheet, angkanya ikut tampil (bertanda <span class="lenc">sheet</span>); begitu diubah di sini, angka sistem yang dipakai.</div>
-  <div class="tabel"><table>
-    <thead><tr><th></th><th colspan="3">Shopee (isi manual)</th><th colspan="2">Otomatis</th><th colspan="2"></th></tr>
-    <tr><th>Tanggal</th><th>Cost iklan Shopee</th><th>Omset</th><th>Pesanan</th><th>Cost CPAS Meta</th><th>ROAS All</th><th>Catatan</th><th>Terakhir diubah</th></tr></thead>
-    <tbody><?php foreach ($HARI as $t => $r): $s = $SH[$t] ?? []; $depan = $t > date('Y-m-d'); ?><tr data-t="<?= e($t) ?>">
+  <div class="ket">Isi <b>Cost, Omset, Pesanan</b> dari Seller Center di kotak putih. Presentase Shopee Ads, CPR, dan ROAS dihitung otomatis seperti di sheet. Tersimpan otomatis dan ikut ke sheet.</div>
+  <style>
+  .lsh td{padding:3px 6px!important}.lsh .inp{border:1px solid #dfe3ea;border-radius:8px;padding:7px 9px;width:140px}.lsh .inp.cat{width:230px}
+  .lsh td.h{color:#64748b;background:#fafbfd}.lsh .inp::placeholder{color:#cbd5e1}
+  </style>
+  <div class="tabel"><table class="lsh">
+    <thead><tr><th></th><th colspan="6">SHOPEE</th><th colspan="2"></th></tr>
+    <tr><th>Tanggal</th><th>Cost</th><th>Presentase Shopee Ads</th><th>Omset</th><th>Pesanan</th><th>CPR</th><th>ROAS</th><th>Catatan</th><th>Terakhir diubah</th></tr></thead>
+    <tbody><?php foreach ($HARI as $t => $r): $s = $SH[$t] ?? []; $depan = $t > date('Y-m-d') ? 'disabled' : '';
+      $nilai = function ($k) use ($s) { return isset($s[$k]) && $s[$k] !== null ? e(number_format((float)$s[$k], 0, ',', '.')) : ''; }; ?>
+    <tr data-t="<?= e($t) ?>" data-mc="<?= (float)$r['mc'] ?>">
       <td><?= e($label($t)) ?></td>
-      <?php foreach (['cost', 'omset', 'pesanan'] as $k): ?><td><input class="inp" data-k="<?= $k ?>" inputmode="numeric" value="<?= isset($s[$k]) && $s[$k] !== null ? e(number_format((float)$s[$k], 0, ',', '.')) : '' ?>" <?= $depan ? 'disabled' : '' ?>></td><?php endforeach; ?>
-      <td><?= $r['mc'] ? rp($r['mc']) : '–' ?></td><td><?= rs(bagi($r['so'], $r['ca'])) ?></td>
-      <td><input class="inp cat" data-k="catatan" value="<?= e($s['catatan'] ?? '') ?>" <?= $depan ? 'disabled' : '' ?>></td>
+      <td><input class="inp" data-k="cost" inputmode="numeric" placeholder="—" value="<?= $nilai('cost') ?>" <?= $depan ?>></td>
+      <td class="h h-pct"></td>
+      <td><input class="inp" data-k="omset" inputmode="numeric" placeholder="—" value="<?= $nilai('omset') ?>" <?= $depan ?>></td>
+      <td><input class="inp" data-k="pesanan" inputmode="numeric" placeholder="—" value="<?= $nilai('pesanan') ?>" <?= $depan ?>></td>
+      <td class="h h-cpr"></td><td class="h h-roas"></td>
+      <td><input class="inp cat" data-k="catatan" placeholder="—" value="<?= e($s['catatan'] ?? '') ?>" <?= $depan ?>></td>
       <td class="st"><?= !empty($s['diubah_at']) ? (($s['sumber'] === 'sheet' ? '<span class="lenc">sheet</span> ' : e($s['diubah_oleh']) . ' · ') . e(date('d/m H:i', strtotime($s['diubah_at'])))) : '' ?></td>
     </tr><?php endforeach; ?></tbody>
   </table></div>
+  <script>
+  (function () {
+    function n(v) { v = String(v || '').replace(/\D/g, ''); return v === '' ? null : +v; }
+    function rp(x) { return 'Rp' + Math.round(x).toLocaleString('id-ID'); }
+    function hitung(tr) {
+      var c = n(tr.querySelector('[data-k="cost"]').value), o = n(tr.querySelector('[data-k="omset"]').value), p = n(tr.querySelector('[data-k="pesanan"]').value), mc = +tr.dataset.mc || 0;
+      tr.querySelector('.h-pct').textContent = c != null && (c + mc) ? (c / (c + mc) * 100).toFixed(2).replace('.', ',') + '%' : '';
+      tr.querySelector('.h-cpr').textContent = c != null && p ? rp(c / p) : '';
+      tr.querySelector('.h-roas').textContent = c && o != null ? (o / c).toFixed(2).replace('.', ',') : '';
+    }
+    document.querySelectorAll('table.lsh tbody tr').forEach(function (tr) { hitung(tr); tr.addEventListener('input', function () { hitung(tr); }); });
+  })();
+  </script>
 
 <?php else:
   $akunId = (int)($_GET['akun'] ?? 0);
@@ -262,13 +293,18 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
     <input id="sGrup" value="<?= e($ak['grup'] ?? '') ?>" placeholder="Grup (opsional)" style="width:150px">
     <label><input type="checkbox" id="sCpas" <?= !empty($ak['cpas_only']) ? 'checked' : '' ?>> hanya katalog</label>
     <label><input type="checkbox" id="sAktif" <?= !isset($ak['aktif']) || $ak['aktif'] ? 'checked' : '' ?>> aktif</label>
-    <button class="btn" id="sSimpan" type="button">Simpan</button>
+    <button class="btn" id="sSimpan" type="button">Simpan</button><button class="btn abu" id="sHapus" type="button" style="color:#b91c1c">Hapus akun</button>
     <span class="st" id="sPesan"><?= empty($ak['act_id']) ? 'Isi ID akun iklan supaya data Meta terisi otomatis.' : '' ?></span>
   </div>
   <script>
   (function () {
     var $ = function (i) { return document.getElementById(i); }, actLama = <?= json_encode((string)($ak['act_id'] ?? '')) ?>;
     if (/[?&]baru=1/.test(location.search)) { $('sNama').focus(); $('sNama').select(); }
+    $('sHapus').onclick = function () {
+      if (!confirm('Hapus akun "' + $('sNama').value + '"?\n\nTab akun ini di sheet juga ikut terhapus. Data Meta-nya bisa ditarik ulang kalau akun ditambahkan lagi.')) return;
+      $('sPesan').textContent = 'menghapus…';
+      kirim({ aksi: 'hapus_akun', id: <?= (int)$akunId ?> }).then(function (h) { if (!h.ok) { $('sPesan').textContent = h.pesan; return; } location.href = location.pathname + '?merk=' + MERK + '&tab=akun'; });
+    };
     $('sSimpan').onclick = function () {
       $('sPesan').textContent = 'menyimpan…';
       kirim({ aksi: 'akun', id: <?= (int)$akunId ?>, merek: MERK, nama: $('sNama').value, act_id: $('sAct').value, grup: $('sGrup').value, token: $('sTok').value,
