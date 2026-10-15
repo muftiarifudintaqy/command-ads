@@ -596,7 +596,7 @@ if (f) {
     $('aPesan').textContent = 'menyimpan…';
     kirim({ aksi: 'akun', id: +$('aId').value, merek: MERK, nama: $('aNama').value, act_id: $('aAct').value, grup: $('aGrup').value, token: $('aTok').value, cpas_only: $('aCpas').checked ? 1 : 0, aktif: $('aAktif').checked ? 1 : 0, sheet_gid: $('aGid').value })
       .then(function (h) { if (!h.ok) { $('aPesan').textContent = h.pesan; return; } var baru = !+$('aId').value; $('aPesan').textContent = baru ? 'Tersimpan, menarik data bulan ini…' : 'Tersimpan';
-        if (baru) kirim({ aksi: 'tarik', id: h.id }).then(function (x) { alert((h.tab ? h.tab + '\n' : '') + x.pesan + '\n\nJangan lupa: tambahkan tab "' + $('aNama').value + '" ke rumus total CPAS di tab SHOPEE X CPAS.'); location.href = location.pathname + '?merk=' + MERK + '&tab=akun&akun=' + h.id; }); else location.reload(); });
+        if (baru) kirim({ aksi: 'tarik', id: h.id }).then(function (x) { kabar((h.tab ? h.tab + '\n' : '') + x.pesan + '\n\nJangan lupa: tambahkan tab "' + $('aNama').value + '" ke rumus total CPAS di tab SHOPEE X CPAS.').then(function () { location.href = location.pathname + '?merk=' + MERK + '&tab=akun&akun=' + h.id; }); }); else location.reload(); });
   };
   document.querySelectorAll('button.tarik').forEach(function (b) { b.onclick = function () { b.textContent = 'menarik…'; b.disabled = true; kirim({ aksi: 'tarik', id: JSON.parse(b.closest('tr').dataset.a).id }).then(function (x) { kabar(x.pesan, x.ok ? 'Data ditarik' : 'Belum bisa').then(function () { location.reload(); }); }); }; });
 }
