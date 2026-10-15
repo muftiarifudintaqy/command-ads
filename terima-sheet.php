@@ -10,7 +10,7 @@ $mk = ($in['merek'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
 $db = ma_db(); $n = 0;
 // isian dari tab AKUN di sheet
 if (($in['jenis'] ?? '') === 'akun') {
-    $q = $db->prepare("SELECT id FROM akun WHERE merek = ? AND sheet_gid = ?"); $q->execute([$mk, (int)($in['gid'] ?? 0)]); $aid = (int)$q->fetchColumn();
+    $q = $db->prepare("SELECT id FROM akun WHERE merek = ? AND (sheet_gid = ? OR nama = ?) ORDER BY (sheet_gid = ?) DESC LIMIT 1"); $q->execute([$mk, (int)($in['gid'] ?? 0), (string)($in['nama_tab'] ?? ''), (int)($in['gid'] ?? 0)]); $aid = (int)$q->fetchColumn();
     if (!$aid) { echo json_encode(['ok' => false, 'pesan' => 'tab belum tersambung ke akun']); exit; }
     $up = $db->prepare("INSERT INTO meta_harian (akun_id, tanggal, spend, omset, purchase, vc, atc, manual) VALUES (?,?,?,?,?,?,?,1)
         ON DUPLICATE KEY UPDATE spend=VALUES(spend), omset=VALUES(omset), purchase=VALUES(purchase), vc=VALUES(vc), atc=VALUES(atc), manual=1");

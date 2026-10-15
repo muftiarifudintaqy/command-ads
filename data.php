@@ -56,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $tok = in_array($in['token'] ?? '', ['prepare', 'marketBeauty', 'glowingCantik'], true) ? $in['token'] : 'prepare';
             $v = [$mk, $nama, $act, $tok, $mk === 'skinlyfe' ? 'skinlyfe' : 'prepare', empty($in['cpas_only']) ? 0 : 1, trim((string)($in['grup'] ?? '')) ?: null, empty($in['aktif']) ? 0 : 1, ((int)($in['sheet_gid'] ?? 0)) ?: null];
             if ($id) { $v[] = $id; $db->prepare("UPDATE akun SET merek=?, nama=?, act_id=?, token=?, metode=?, cpas_only=?, grup=?, aktif=?, sheet_gid=? WHERE id=?")->execute($v); }
-            else { $db->prepare("INSERT INTO akun (merek, nama, act_id, token, metode, cpas_only, grup, aktif, sheet_gid, urutan) VALUES (?,?,?,?,?,?,?,?,?,99)")->execute($v); $id = (int)$db->lastInsertId(); }
+            else { $db->prepare("INSERT INTO akun (merek, nama, act_id, token, metode, cpas_only, grup, aktif, sheet_gid, urutan) VALUES (?,?,?,?,?,?,?,?,?,99)")->execute($v); $id = (int)$db->lastInsertId(); $bt = ma_buat_tab($id); $jawab(['ok' => true, 'id' => $id, 'tab' => $bt['ok'] ? 'Tab baru dibuat di sheet ✓' : 'Tab sheet belum dibuat: ' . $bt['pesan']]); }
             $jawab(['ok' => true, 'id' => $id]);
         }
         if ($aksi === 'tarik') {
@@ -65,7 +65,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$a) $jawab(['ok' => false, 'pesan' => 'Akun tidak ditemukan']);
             $n = 0; $t = date('Y-m-01'); $kemarin = date('Y-m-d', strtotime('-1 day'));
             for (; $t <= $kemarin; $t = date('Y-m-d', strtotime($t . ' +1 day'))) { $m = ma_meta_hari($a, $t); if (array_filter($m)) { ma_simpan_meta((int)$a['id'], $t, $m); $n++; } }
-            $jawab(['ok' => true, 'pesan' => "$n hari terisi dari Meta."]);
+            $ks = !empty($a['isi_sheet']) ? ' ' . ma_kirim_sheet_akun_banyak((int)$a['id'], date('Y-m-01'), $kemarin) : '';
+            $jawab(['ok' => true, 'pesan' => "$n hari terisi dari Meta." . $ks]);
         }
         $jawab(['ok' => false, 'pesan' => 'Aksi tidak dikenal']);
     } catch (Throwable $e) { $jawab(['ok' => false, 'pesan' => $e->getMessage()]); }
@@ -293,6 +294,7 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
     <label><input type="checkbox" id="aCpas"> hanya katalog</label><label><input type="checkbox" id="aAktif" checked> aktif</label>
     <button class="btn" id="aSimpan">Simpan</button><button class="btn abu" id="aBatal" type="button">Batal</button><span class="st" id="aPesan"></span>
   </div>
+  <script>if (/[?&]baru=1/.test(location.search)) { var n = document.getElementById('aNama'); n.focus(); n.closest('.form').style.boxShadow = '0 0 0 3px color-mix(in srgb,var(--w) 35%,transparent)'; }</script>
   <div class="tabel"><table><thead><tr><th>Akun</th><th>Grup</th><th>ID akun</th><th>Spend bulan ini</th><th>Omset</th><th>Purchase</th><th>ROAS</th><th>Status</th><th></th></tr></thead><tbody>
   <?php foreach ($AK as $r): ?><tr class="<?= $r['aktif'] ? '' : 'mati' ?>" data-a='<?= e(json_encode(['id' => (int)$r['id'], 'nama' => $r['nama'], 'act_id' => $r['act_id'], 'grup' => $r['grup'], 'token' => $r['token'], 'cpas_only' => (int)$r['cpas_only'], 'aktif' => (int)$r['aktif'], 'sheet_gid' => $r['sheet_gid']])) ?>'>
     <td><a class="akun" href="<?= e($url(['akun' => $r['id']])) ?>"><?= e($r['nama']) ?></a></td><td style="text-align:left"><?= e($r['grup']) ?></td><td style="text-align:left"><?= e($r['act_id']) ?></td>
@@ -317,6 +319,7 @@ body{padding-bottom:60px}
   <a href="<?= e($url(['tab' => 'input', 'akun' => null])) ?>" class="<?= $tab === 'input' ? 'on' : '' ?>">✏️ Input Shopee</a>
   <span class="sep"></span>
   <?php foreach ($AKB as $x): ?><a href="<?= e($url(['tab' => 'akun', 'akun' => $x['id']])) ?>" class="<?= ($tab === 'akun' && $akunAktif === (int)$x['id']) ? 'on' : '' ?> <?= $x['aktif'] ? '' : 'mati' ?>"><?= e($x['nama']) ?></a><?php endforeach; ?>
+  <a href="<?= e($url(['tab' => 'akun', 'akun' => null, 'baru' => 1])) ?>" title="Tambah akun baru" style="font-size:15px;padding:5px 13px">＋</a>
   <span class="sep"></span>
   <a href="<?= e($url(['tab' => 'akun', 'akun' => null])) ?>" class="<?= ($tab === 'akun' && !$akunAktif) ? 'on' : '' ?>">⚙️ Kelola akun</a>
 </nav>
@@ -424,7 +427,7 @@ if (f) {
     $('aPesan').textContent = 'menyimpan…';
     kirim({ aksi: 'akun', id: +$('aId').value, merek: MERK, nama: $('aNama').value, act_id: $('aAct').value, grup: $('aGrup').value, token: $('aTok').value, cpas_only: $('aCpas').checked ? 1 : 0, aktif: $('aAktif').checked ? 1 : 0, sheet_gid: $('aGid').value })
       .then(function (h) { if (!h.ok) { $('aPesan').textContent = h.pesan; return; } var baru = !+$('aId').value; $('aPesan').textContent = baru ? 'Tersimpan, menarik data bulan ini…' : 'Tersimpan';
-        if (baru) kirim({ aksi: 'tarik', id: h.id }).then(function (x) { alert(x.pesan); location.reload(); }); else location.reload(); });
+        if (baru) kirim({ aksi: 'tarik', id: h.id }).then(function (x) { alert((h.tab ? h.tab + '\n' : '') + x.pesan + '\n\nJangan lupa: tambahkan tab "' + $('aNama').value + '" ke rumus total CPAS di tab SHOPEE X CPAS.'); location.href = location.pathname + '?merk=' + MERK + '&tab=akun&akun=' + h.id; }); else location.reload(); });
   };
   document.querySelectorAll('button.tarik').forEach(function (b) { b.onclick = function () { b.textContent = 'menarik…'; b.disabled = true; kirim({ aksi: 'tarik', id: JSON.parse(b.closest('tr').dataset.a).id }).then(function (x) { alert(x.ok ? x.pesan : x.pesan); location.reload(); }); }; });
 }
