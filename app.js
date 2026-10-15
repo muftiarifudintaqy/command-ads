@@ -1702,4 +1702,52 @@ try { (function () {
     };
   }
   tRiw.addEventListener("click", buka);
-})(); } catch (e) { console.error('[riwayat-chat]', e); }
+  new Image().src = 'api.php?action=jslog&riwayat=aktif&t=' + Date.now();
+})(); } catch (e) { console.error('[riwayat-chat]', e); new Image().src = 'api.php?action=jslog&riwayat=ERROR&pesan=' + encodeURIComponent(String(e && e.stack || e).slice(0, 300)) + '&t=' + Date.now(); }
+
+// ---------- [ketik-jalankan] ketik "jalankan" = tekan tombol Jalankan usulan terakhir, dengan konfirmasi ----------
+try { (function () {
+  const POLA = /^\s*(ya[, ]*)?(ok(e|ay)?[, ]*)?(jalankan|jalanin|gas|gass+|gaskeun|eksekusi|lakukan|matiin aja|nyalain aja|run)\b[\s!.]*$/i;
+  const r0 = document.getElementById("chatRiwayat") || document.getElementById("chatReset"); if (!r0) return;
+  let panel = r0; while (panel && !panel.querySelector("textarea")) panel = panel.parentElement; if (!panel) return;
+  const ta = panel.querySelector("textarea");
+  const tombolKirim = Array.from(panel.querySelectorAll("button")).find(b => /kirim/i.test(b.textContent));
+  function tertunda() {
+    const semua = Array.from(panel.querySelectorAll("button[data-act]")).filter(b => b.dataset.act !== "skip" && !b.disabled && b.offsetParent !== null && /jalan|run|eksekusi/i.test(b.textContent + " " + b.dataset.act));
+    if (!semua.length) return [];
+    const msgTerakhir = semua[semua.length - 1].closest(".msg") || panel;
+    return semua.filter(b => (b.closest(".msg") || panel) === msgTerakhir);
+  }
+  const st = document.createElement("style");
+  st.textContent = `.kj-bg{position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.35);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;animation:kjIn .18s ease}
+  .kj-k{width:min(440px,92vw);background:var(--card,#fff);color:inherit;border-radius:18px;padding:20px;box-shadow:0 30px 70px rgba(15,23,42,.3);animation:kjUp .22s cubic-bezier(.2,.9,.3,1.15)}
+  .kj-k h3{margin:0 0 6px;font-size:16px}.kj-k p{margin:0 0 10px;font-size:13px;opacity:.75}
+  .kj-l{max-height:40vh;overflow:auto;margin:0 0 14px;padding:0;list-style:none}.kj-l li{font-size:13px;padding:8px 10px;border-radius:10px;background:rgba(124,58,237,.08);margin-bottom:6px}
+  .kj-t{display:flex;gap:8px;justify-content:flex-end}.kj-t button{border:0;border-radius:10px;padding:9px 16px;font:inherit;font-weight:600;cursor:pointer}
+  .kj-b{background:rgba(127,127,127,.15);color:inherit}.kj-y{background:#dc2626;color:#fff}
+  @keyframes kjIn{from{opacity:0}}@keyframes kjUp{from{opacity:0;transform:translateY(10px) scale(.96)}}`;
+  document.head.appendChild(st);
+  function konfirmasi(daftar) {
+    return new Promise(res => {
+      const bg = document.createElement("div"); bg.className = "kj-bg";
+      bg.innerHTML = `<div class="kj-k"><h3>Jalankan tindakan ini ke Meta?</h3><p>Perintah langsung dikirim ke Ads Manager.</p><ul class="kj-l">${daftar.map(t => `<li>${esc(t)}</li>`).join("")}</ul><div class="kj-t"><button class="kj-b" type="button">Batal</button><button class="kj-y" type="button">Ya, jalankan</button></div></div>`;
+      document.body.appendChild(bg);
+      const selesai = v => { document.removeEventListener("keydown", kunci, true); bg.remove(); res(v); };
+      const kunci = e => { if (e.key === "Escape") { e.preventDefault(); selesai(false); } else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); selesai(true); } };
+      bg.querySelector(".kj-b").onclick = () => selesai(false); bg.querySelector(".kj-y").onclick = () => selesai(true);
+      bg.onclick = e => { if (e.target === bg) selesai(false); };
+      document.addEventListener("keydown", kunci, true); setTimeout(() => bg.querySelector(".kj-y").focus(), 50);
+    });
+  }
+  async function cegat(e) {
+    if (!POLA.test(ta.value || "")) return;
+    const tb = tertunda(); if (!tb.length) return;      // tidak ada usulan tertunda → biarkan ke AI
+    e.preventDefault(); e.stopImmediatePropagation();
+    const daftar = tb.map(b => { const kartu = b.closest("[class*='act'], li, .card, div") || b.parentElement; return (kartu.textContent || "").replace(/\s+/g, " ").replace(/(Jalankan|Lewati|Skip)/gi, "").trim().slice(0, 160) || b.textContent.trim(); });
+    if (!(await konfirmasi(daftar))) return;
+    ta.value = ""; ta.dispatchEvent(new Event("input", { bubbles: true }));
+    for (const b of tb) { b.click(); await new Promise(r => setTimeout(r, 400)); }
+  }
+  ta.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) cegat(e); }, true);
+  if (tombolKirim) tombolKirim.addEventListener("click", cegat, true);
+})(); } catch (e) { console.error("[ketik-jalankan]", e); }
