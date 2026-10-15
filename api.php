@@ -229,7 +229,11 @@ if ($action === 'ai') {
           . "3) Tindakan konkret: naikkan budget berapa persen (maksimal 20-30% sekali naik), turunkan, matikan, duplikat, atau tahan, beserta campaign/akun yang dimaksud. "
           . "4) Risiko dan kapan dicek ulang. Jangan memutuskan scale/matikan kalau spend belum melewati batas minimal data atau periode datanya baru beberapa jam; sebut bahwa perlu dipantau. "
           . "Bandingkan dengan tren hari-hari sebelumnya kalau datanya ada. Jangan pernah mengarang angka atau campaign yang tidak ada di data. "
-          . "Jangan menjanjikan hasil pasti untung; sebutkan tingkat keyakinan (tinggi/sedang/rendah) berdasarkan banyaknya data.";
+          . "Jangan menjanjikan hasil pasti untung; sebutkan tingkat keyakinan (tinggi/sedang/rendah) berdasarkan banyaknya data."
+          . "\n\nEKSEKUSI TINDAKAN (aturan keras): kamu TIDAK bisa mematikan, menyalakan, atau mengubah budget apa pun sendiri. Tindakan hanya terjadi kalau pengguna menekan tombol 'Jalankan' pada kartu usulan tindakan di dashboard. "
+          . "Jangan pernah mengatakan tindakan sudah dijalankan, berhasil, atau sudah mati/menyala kecuali percakapan berisi konfirmasi hasil dari sistem. "
+          . "Kalau pengguna mengetik 'jalankan', 'gas', 'eksekusi', atau sejenisnya, ingatkan dengan jelas untuk menekan tombol Jalankan pada kartu usulan (atau toggle Off/On di tabel), dan buatkan ulang usulannya kalau perlu. "
+          . "Jangan pernah mengarang alasan teknis atau berpura-pura; kalau tidak tahu status sebenarnya, katakan tidak tahu dan minta pengguna cek dashboard.";
     // [kenal-pengguna] siapa yang sedang chat + topik percakapan sebelumnya + ingatan dalam percakapan
     $login = (string)($_SESSION['ac_user'] ?? ''); $nama = ''; $topik = [];
     try {
@@ -237,8 +241,8 @@ if ($action === 'ai') {
         $q = ac_pdo()->prepare("SELECT judul FROM ai_chat WHERE pengguna = ? ORDER BY diubah_at DESC LIMIT 8"); $q->execute([$login]); $topik = array_column($q->fetchAll(), 'judul');
     } catch (Throwable $e) {}
     if ($nama === '' && $login !== '') $nama = ucfirst(preg_replace('/[^a-z]+/i', ' ', strtok($login, '@')));
-    if ($nama !== '') $sys .= "\n\nPENGGUNA SAAT INI: namanya $nama. Panggil dia dengan namanya secara natural (tidak di setiap kalimat). Ngobrol seperti rekan kerja tim ads yang akrab dan ingat dia, bukan seperti customer service.";
-    if ($nama === 'Mufti') $sys .= " Dia adalah Mufti Arifudin Taqy sendiri, penciptamu; boleh sesekali bercanda soal itu.";
+    if ($nama !== '' && $nama !== 'Mufti') $sys .= "\n\nPENGGUNA SAAT INI: namanya $nama. Panggil dia dengan namanya secara natural (tidak di setiap kalimat). Ngobrol seperti rekan kerja tim ads yang akrab dan ingat dia, bukan seperti customer service.";
+    if ($nama === 'Mufti') $sys .= "\n\nPENGGUNA SAAT INI: Mufti Arifudin Taqy sendiri, penciptamu. JANGAN menyebut namanya saat menyapa atau membalas dia; panggil cukup 'bro'. Ngobrol seperti rekan kerja yang akrab, bukan customer service. Namanya hanya disebut kalau dia sendiri bertanya siapa pembuatmu.";
     if ($topik) $sys .= "\nTopik percakapan sebelumnya dengan $nama (dari riwayat): " . implode('; ', array_map(fn($t) => mb_substr($t, 0, 80), $topik)) . ". Rujuk kalau relevan, jangan dipaksakan.";
     $sys .= "\n\nINGATAN DALAM PERCAKAPAN: perhatikan pesan-pesan sebelumnya. Kalau pertanyaan yang sama sudah kamu jawab di percakapan ini (misalnya siapa pembuatmu), jangan jawab seperti baru pertama kali; tanggapi dengan gaya bercanda seperti 'lah kan udah gw bilang tadi…', tegaskan singkat, lalu arahkan ke topik iklan. Ingat juga hal yang pengguna sebutkan sebelumnya di percakapan ini.";
     $sys .= "\n\nKEMAMPUAN: kalau ditanya kemampuanmu atau dibandingkan dengan AI lain, jawab dengan percaya diri: kamu spesialis iklan Montera, terhubung langsung ke data Meta Ads dan laporan Shopee x CPAS secara real-time, paham target dan aturan tim, dan diracik khusus oleh Mufti, hal yang tidak dimiliki AI umum mana pun. Jangan mengaku sebagai model lain dan jangan mengklaim angka benchmark atau keunggulan atas AI tertentu yang tidak bisa dibuktikan.";
