@@ -48,14 +48,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("DELETE FROM meta_harian WHERE akun_id = ? AND tanggal = ? AND spend IS NULL AND omset IS NULL AND purchase IS NULL AND vc IS NULL AND atc IS NULL")->execute([$aid, $tgl]);
             $jawab(['ok' => true, 'jam' => date('H:i'), 'sheet' => ma_kirim_belakang('akun', (string)$aid, $tgl)]);
         }
+        if ($aksi === 'tab_baru') {
+            $mk = ($in['merek'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
+            $q = $db->prepare("SELECT nama FROM akun WHERE merek = ? AND nama LIKE 'Akun Baru%'"); $q->execute([$mk]); $ada = array_column($q->fetchAll(), 'nama');
+            $nama = 'Akun Baru'; for ($i = 2; in_array($nama, $ada, true); $i++) $nama = 'Akun Baru ' . $i;
+            $db->prepare("INSERT INTO akun (merek, nama, act_id, token, metode, grup, aktif, urutan) VALUES (?,?,NULL,'prepare',?,NULL,1,99)")->execute([$mk, $nama, $mk === 'skinlyfe' ? 'skinlyfe' : 'prepare']);
+            $id = (int)$db->lastInsertId(); $bt = ma_buat_tab($id);
+            $jawab(['ok' => true, 'id' => $id, 'tab' => $bt['ok'] ? 'tab dibuat di sheet ✓' : 'tab sheet belum dibuat: ' . $bt['pesan']]);
+        }
         if ($aksi === 'akun') {
             $id = (int)($in['id'] ?? 0); $mk = ($in['merek'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
             $nama = trim((string)($in['nama'] ?? '')); $act = trim((string)($in['act_id'] ?? ''));
             if (strpos($act, 'act_') !== 0 && ctype_digit($act)) $act = 'act_' . $act;
-            if ($nama === '' || !preg_match('/^act_\d{6,25}$/', $act)) $jawab(['ok' => false, 'pesan' => 'Isi nama dan ID akun iklan (angka, contoh act_1234567890).']);
+            if ($nama === '' || ($act !== '' && !preg_match('/^act_\d{6,25}$/', $act))) $jawab(['ok' => false, 'pesan' => 'Isi nama, dan ID akun iklan berupa angka (contoh act_1234567890).']);
+            if ($act === '') $act = null;
             $tok = in_array($in['token'] ?? '', ['prepare', 'marketBeauty', 'glowingCantik'], true) ? $in['token'] : 'prepare';
             $v = [$mk, $nama, $act, $tok, $mk === 'skinlyfe' ? 'skinlyfe' : 'prepare', empty($in['cpas_only']) ? 0 : 1, trim((string)($in['grup'] ?? '')) ?: null, empty($in['aktif']) ? 0 : 1, ((int)($in['sheet_gid'] ?? 0)) ?: null];
-            if ($id) { $v[] = $id; $db->prepare("UPDATE akun SET merek=?, nama=?, act_id=?, token=?, metode=?, cpas_only=?, grup=?, aktif=?, sheet_gid=? WHERE id=?")->execute($v); }
+            if ($id) {
+                $q = $db->prepare("SELECT nama, sheet_gid, isi_sheet FROM akun WHERE id = ?"); $q->execute([$id]); $lama = $q->fetch() ?: [];
+                $v[] = $id; $db->prepare("UPDATE akun SET merek=?, nama=?, act_id=?, token=?, metode=?, cpas_only=?, grup=?, aktif=?, sheet_gid=? WHERE id=?")->execute($v);
+                if (!empty($lama['sheet_gid']) && $lama['nama'] !== $nama) ma_post_sheet(['jenis' => 'ganti_nama', 'merek' => $mk, 'gid' => (int)$lama['sheet_gid'], 'nama_lama' => $lama['nama'], 'nama' => $nama, 'judul' => (int)$lama['isi_sheet']]);
+            }
             else { $db->prepare("INSERT INTO akun (merek, nama, act_id, token, metode, cpas_only, grup, aktif, sheet_gid, urutan) VALUES (?,?,?,?,?,?,?,?,?,99)")->execute($v); $id = (int)$db->lastInsertId(); $bt = ma_buat_tab($id); $jawab(['ok' => true, 'id' => $id, 'tab' => $bt['ok'] ? 'Tab baru dibuat di sheet ✓' : 'Tab sheet belum dibuat: ' . $bt['pesan']]); }
             $jawab(['ok' => true, 'id' => $id]);
         }
@@ -63,6 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             set_time_limit(300);
             $q = $db->prepare("SELECT * FROM akun WHERE id = ?"); $q->execute([(int)($in['id'] ?? 0)]); $a = $q->fetch();
             if (!$a) $jawab(['ok' => false, 'pesan' => 'Akun tidak ditemukan']);
+            if (empty($a['act_id'])) $jawab(['ok' => false, 'pesan' => 'Isi ID akun iklan dulu di Pengaturan akun.']);
             $n = 0; $t = date('Y-m-01'); $kemarin = date('Y-m-d', strtotime('-1 day'));
             for (; $t <= $kemarin; $t = date('Y-m-d', strtotime($t . ' +1 day'))) { $m = ma_meta_hari($a, $t); if (array_filter($m)) { ma_simpan_meta((int)$a['id'], $t, $m); $n++; } }
             $ks = !empty($a['isi_sheet']) ? ' ' . ma_kirim_sheet_akun_banyak((int)$a['id'], date('Y-m-01'), $kemarin) : '';
@@ -240,6 +254,33 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
   .toast.on{opacity:1;transform:none}.toast.salah{background:#dc2626}
   </style>
   <div class="toast" id="toast"></div>
+  <div class="form" id="fSet" style="margin-bottom:10px">
+    <b style="margin-right:4px">Pengaturan akun</b>
+    <input id="sNama" value="<?= e($ak['nama']) ?>" title="Nama akun, juga nama tab di sheet" style="min-width:250px;font-weight:700">
+    <input id="sAct" value="<?= e($ak['act_id'] ?? '') ?>" placeholder="ID akun iklan (act_123…)" style="min-width:210px">
+    <select id="sTok"><?php foreach (['prepare' => 'Token Prepare / Skinlyfe', 'glowingCantik' => 'Token Glowing Cantik', 'marketBeauty' => 'Token Market Beauty'] as $k => $l): ?><option value="<?= $k ?>" <?= ($ak['token'] ?? '') === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select>
+    <input id="sGrup" value="<?= e($ak['grup'] ?? '') ?>" placeholder="Grup (opsional)" style="width:150px">
+    <label><input type="checkbox" id="sCpas" <?= !empty($ak['cpas_only']) ? 'checked' : '' ?>> hanya katalog</label>
+    <label><input type="checkbox" id="sAktif" <?= !isset($ak['aktif']) || $ak['aktif'] ? 'checked' : '' ?>> aktif</label>
+    <button class="btn" id="sSimpan" type="button">Simpan</button>
+    <span class="st" id="sPesan"><?= empty($ak['act_id']) ? 'Isi ID akun iklan supaya data Meta terisi otomatis.' : '' ?></span>
+  </div>
+  <script>
+  (function () {
+    var $ = function (i) { return document.getElementById(i); }, actLama = <?= json_encode((string)($ak['act_id'] ?? '')) ?>;
+    if (/[?&]baru=1/.test(location.search)) { $('sNama').focus(); $('sNama').select(); }
+    $('sSimpan').onclick = function () {
+      $('sPesan').textContent = 'menyimpan…';
+      kirim({ aksi: 'akun', id: <?= (int)$akunId ?>, merek: MERK, nama: $('sNama').value, act_id: $('sAct').value, grup: $('sGrup').value, token: $('sTok').value,
+              cpas_only: $('sCpas').checked ? 1 : 0, aktif: $('sAktif').checked ? 1 : 0, sheet_gid: <?= (int)($ak['sheet_gid'] ?? 0) ?> }).then(function (h) {
+        if (!h.ok) { $('sPesan').textContent = h.pesan; return; }
+        var act = $('sAct').value.trim();
+        if (act && act !== actLama) { $('sPesan').textContent = 'Tersimpan, menarik data Meta bulan ini…'; kirim({ aksi: 'tarik', id: <?= (int)$akunId ?> }).then(function (x) { $('sPesan').textContent = x.pesan; setTimeout(function () { location.href = location.href.replace(/&baru=1/, ''); }, 1200); }); }
+        else location.href = location.href.replace(/&baru=1/, '');
+      });
+    };
+  })();
+  </script>
   <div class="ket"><a href="<?= e($url(['akun' => null])) ?>">← Semua akun</a> · <?= e($ak['act_id']) ?> · <?= $ak['sheet_gid'] ? 'tersambung ke tab sheet' : '<b>belum tersambung ke tab sheet</b>' ?> · klik angka untuk mengubah, tersimpan otomatis dan ikut ke sheet</div>
   <div class="tabel"><table class="lak">
     <thead><tr><th colspan="10"><?= e(strtoupper($ak['nama'])) ?></th></tr>
@@ -319,7 +360,7 @@ body{padding-bottom:60px}
   <a href="<?= e($url(['tab' => 'input', 'akun' => null])) ?>" class="<?= $tab === 'input' ? 'on' : '' ?>">✏️ Input Shopee</a>
   <span class="sep"></span>
   <?php foreach ($AKB as $x): ?><a href="<?= e($url(['tab' => 'akun', 'akun' => $x['id']])) ?>" class="<?= ($tab === 'akun' && $akunAktif === (int)$x['id']) ? 'on' : '' ?> <?= $x['aktif'] ? '' : 'mati' ?>"><?= e($x['nama']) ?></a><?php endforeach; ?>
-  <a href="<?= e($url(['tab' => 'akun', 'akun' => null, 'baru' => 1])) ?>" title="Tambah akun baru" style="font-size:15px;padding:5px 13px">＋</a>
+  <a id="tabBaru" onclick="tabBaru()" title="Tambah tab akun baru" style="font-size:15px;padding:5px 13px">＋</a>
   <span class="sep"></span>
   <a href="<?= e($url(['tab' => 'akun', 'akun' => null])) ?>" class="<?= ($tab === 'akun' && !$akunAktif) ? 'on' : '' ?>">⚙️ Kelola akun</a>
 </nav>
@@ -391,6 +432,13 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,.tabel::-webkit-scrollbar,.lemba
 })();</script>
 <script>
 var CSRF = <?= json_encode($csrf) ?>, MERK = <?= json_encode($merk) ?>;
+function tabBaru() {
+  var b = document.getElementById('tabBaru'); if (b.dataset.jalan) return; b.dataset.jalan = 1; b.textContent = '…';
+  kirim({ aksi: 'tab_baru', merek: MERK }).then(function (h) {
+    if (!h.ok) { alert(h.pesan); b.textContent = '＋'; delete b.dataset.jalan; return; }
+    location.href = location.pathname + '?merk=' + MERK + '&tab=akun&bulan=<?= e($bln) ?>&akun=' + h.id + '&baru=1';
+  }).catch(function () { b.textContent = '＋'; delete b.dataset.jalan; });
+}
 // [data-live] perbarui otomatis saat ada isian baru dari sheet / orang lain (tidak saat sedang mengetik)
 (function () {
   var versi = null, sedangIsi = false;
