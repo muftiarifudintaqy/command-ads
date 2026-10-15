@@ -182,6 +182,13 @@ if ($action === 'gsheet') {
     out(['url' => (string)($j['url'] ?? '')]);
 }
 
+/* koneksi DB montera_ads (riwayat chat, nama pengguna) */
+function ac_pdo(): PDO {
+    static $p = null; if ($p) return $p;
+    $e = []; foreach (@file('/etc/montera-ads-db.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $l) if (strpos($l, '=') !== false) { [$k, $v] = explode('=', $l, 2); $e[trim($k)] = trim($v, " \t\"'"); }
+    return $p = new PDO('mysql:host=' . ($e['DB_HOST'] ?? 'localhost') . ';dbname=' . ($e['DB_NAME'] ?? 'montera_ads') . ';charset=utf8mb4', $e['DB_USER'] ?? '', $e['DB_PASS'] ?? '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+}
+
 /* ---------- riwayat percakapan Montera AI (tersimpan di server per pengguna) ---------- */
 if (in_array($action, ['chat_daftar', 'chat_buka', 'chat_simpan', 'chat_hapus'], true)) {
     $e = []; foreach (@file('/etc/montera-ads-db.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $l) if (strpos($l, '=') !== false) { [$k, $v] = explode('=', $l, 2); $e[trim($k)] = trim($v, " \t\"'"); }
@@ -223,6 +230,18 @@ if ($action === 'ai') {
           . "4) Risiko dan kapan dicek ulang. Jangan memutuskan scale/matikan kalau spend belum melewati batas minimal data atau periode datanya baru beberapa jam; sebut bahwa perlu dipantau. "
           . "Bandingkan dengan tren hari-hari sebelumnya kalau datanya ada. Jangan pernah mengarang angka atau campaign yang tidak ada di data. "
           . "Jangan menjanjikan hasil pasti untung; sebutkan tingkat keyakinan (tinggi/sedang/rendah) berdasarkan banyaknya data.";
+    // [kenal-pengguna] siapa yang sedang chat + topik percakapan sebelumnya + ingatan dalam percakapan
+    $login = (string)($_SESSION['ac_user'] ?? ''); $nama = ''; $topik = [];
+    try {
+        $q = ac_pdo()->prepare("SELECT nama FROM ai_nama WHERE login = ?"); $q->execute([$login]); $nama = (string)($q->fetchColumn() ?: '');
+        $q = ac_pdo()->prepare("SELECT judul FROM ai_chat WHERE pengguna = ? ORDER BY diubah_at DESC LIMIT 8"); $q->execute([$login]); $topik = array_column($q->fetchAll(), 'judul');
+    } catch (Throwable $e) {}
+    if ($nama === '' && $login !== '') $nama = ucfirst(preg_replace('/[^a-z]+/i', ' ', strtok($login, '@')));
+    if ($nama !== '') $sys .= "\n\nPENGGUNA SAAT INI: namanya $nama. Panggil dia dengan namanya secara natural (tidak di setiap kalimat). Ngobrol seperti rekan kerja tim ads yang akrab dan ingat dia, bukan seperti customer service.";
+    if ($nama === 'Mufti') $sys .= " Dia adalah Mufti Arifudin Taqy sendiri, penciptamu; boleh sesekali bercanda soal itu.";
+    if ($topik) $sys .= "\nTopik percakapan sebelumnya dengan $nama (dari riwayat): " . implode('; ', array_map(fn($t) => mb_substr($t, 0, 80), $topik)) . ". Rujuk kalau relevan, jangan dipaksakan.";
+    $sys .= "\n\nINGATAN DALAM PERCAKAPAN: perhatikan pesan-pesan sebelumnya. Kalau pertanyaan yang sama sudah kamu jawab di percakapan ini (misalnya siapa pembuatmu), jangan jawab seperti baru pertama kali; tanggapi dengan gaya bercanda seperti 'lah kan udah gw bilang tadi…', tegaskan singkat, lalu arahkan ke topik iklan. Ingat juga hal yang pengguna sebutkan sebelumnya di percakapan ini.";
+    $sys .= "\n\nKEMAMPUAN: kalau ditanya kemampuanmu atau dibandingkan dengan AI lain, jawab dengan percaya diri: kamu spesialis iklan Montera, terhubung langsung ke data Meta Ads dan laporan Shopee x CPAS secara real-time, paham target dan aturan tim, dan diracik khusus oleh Mufti, hal yang tidak dimiliki AI umum mana pun. Jangan mengaku sebagai model lain dan jangan mengklaim angka benchmark atau keunggulan atas AI tertentu yang tidak bisa dibuktikan.";
     $msgs = array_values(array_filter($in['messages'] ?? [], fn($m) => is_array($m) && isset($m['role'], $m['content'])));
     if (!$msgs) fail('Pesan kosong');
     $A = $C['ai']; $P = $A['provider'] ?? 'gemini';
