@@ -1750,7 +1750,8 @@ try { (function () {
     const daftar = tampil.map(b => { const kartu = b.closest("[class*='act'], li, .card, div") || b.parentElement; return (kartu.textContent || "").replace(/\s+/g, " ").replace(/(Jalankan|Lewati|Skip)/gi, "").trim().slice(0, 160) || b.textContent.trim(); });
     if (!(await konfirmasi(daftar))) return;
     ta.value = ""; ta.dispatchEvent(new Event("input", { bubbles: true }));
-    for (const b of tb) { b.click(); await new Promise(r => setTimeout(r, 400)); }
+    const confirmAsli = window.confirm; window.confirm = () => true;   // sudah dikonfirmasi lewat dialog baru → tidak ditanya dua kali
+    try { for (const b of tb) { b.click(); await new Promise(r => setTimeout(r, 400)); } } finally { window.confirm = confirmAsli; }
   }
   ta.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) cegat(e); }, true);
   if (tombolKirim) tombolKirim.addEventListener("click", cegat, true);
