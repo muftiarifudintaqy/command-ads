@@ -175,6 +175,10 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
+/* [sebulan] tanggal tanpa data & status isian */
+.kosong{color:#cbd5e1}.baris-kosong td{color:#94a3b8}.baris-kosong td:first-child{color:#94a3b8!important;font-weight:500}
+.lenc-w{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;background:#fef3c7;color:#b45309;font-size:10.5px;font-weight:600;vertical-align:1px}
+.sd{display:inline-block;margin-left:8px;padding:2px 10px;border-radius:999px;background:color-mix(in srgb,var(--w) 10%,#fff);color:#334155}
 /* [segar] tampilan modern */
 body{font-family:'Inter',-apple-system,Segoe UI,Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;
   background:radial-gradient(1100px 520px at 0% -10%,color-mix(in srgb,var(--w) 9%,transparent),transparent 70%),radial-gradient(900px 480px at 100% 0%,color-mix(in srgb,var(--w) 5%,transparent),transparent 70%),#f6f7fb;background-attachment:fixed}
@@ -202,7 +206,10 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
 </div>
 <div class="isi">
 <?php if ($tab === 'laporan'):
-  $a = $isi ? $isi[count($isi) - 1] : null; $b = count($isi) > 1 ? $isi[count($isi) - 2] : null;
+  $isiS = array_values(array_filter($HARI, function ($r) { return $r['sc'] || $r['so']; }));
+  $isiM = array_values(array_filter($HARI, function ($r) { return (bool)$r['mc']; }));
+  $a = $isiS ? $isiS[count($isiS) - 1] : null; $b = count($isiS) > 1 ? $isiS[count($isiS) - 2] : null;
+  $sdS = $isiS ? date('d', strtotime($a['t'])) . ' ' . substr($NB[$bl], 0, 3) : '–'; $sdM = $isiM ? date('d', strtotime($isiM[count($isiM) - 1]['t'])) . ' ' . substr($NB[$bl], 0, 3) : '–';
   $dl = function ($x, $y, $balik = false) { if ($x === null || !$y) return ''; $p = ($x - $y) / abs($y) * 100; $baik = $balik ? $p < 0 : $p >= 0; return '<span class="' . ($baik ? 'up' : 'dn') . '">' . ($p >= 0 ? '▲' : '▼') . ' ' . number_format(abs($p), 1, ',', '.') . '%</span>'; };
   $romi = function ($r) { return $r ? bagi($r['so'], $r['ca']) : null; };
   $avgS = bagi($TOT['so'], $TOT['sc']); $avgM = bagi($TOT['mo'], $TOT['mc']); $avgA = bagi($TOT['so'], $TOT['ca']);
@@ -215,7 +222,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
       . 'Daily Cost All: ' . rp($a['ca']) . "\n" . 'Daily CPR All: ' . rp(bagi($a['ca'], $a['sp'])) . "\n" . 'Daily Roas All / ROMI: ' . rs($romi($a)) . "\n\n"
       . '*Total ' . $NB[$bl] . ' ' . $th . "*\n" . 'Omset Shopee: ' . rp($TOT['so']) . "\n" . 'Pesanan: ' . an($TOT['sp']) . "\n"
       . 'Daily Cost All: ' . rp($TOT['ca']) . "\n" . 'Daily Roas All / ROMI: ' . rs($avgA); ?>
-  <div class="alat"><div class="ket" style="margin:0">Hari terakhir terisi: <b><?= e($label($a['t'])) ?></b> · dibanding hari sebelumnya</div>
+  <div class="alat"><div class="ket" style="margin:0">Laporan lengkap terakhir: <b><?= e($label($a['t'])) ?></b> · dibanding hari sebelumnya <span class="sd">Shopee terisi s/d <b><?= e($sdS) ?></b> · CPAS Meta s/d <b><?= e($sdM) ?></b></span></div>
     <div class="alat-kanan"><button class="btn abu" id="bSalin" type="button">📋 Salin ringkasan</button></div></div>
   <script>
   (function () {
@@ -236,10 +243,14 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
   <div class="tabel"><table>
     <thead><tr><th></th><th colspan="6">SHOPEE</th><th colspan="6">CPAS META</th><th colspan="3">Daily All Platform</th></tr>
     <tr><th>Tanggal</th><th>Cost</th><th>Presentase Shopee Ads</th><th>Omset</th><th>Pesanan</th><th>CPR</th><th>ROAS</th><th>Cost</th><th>Omset</th><th>Purchases with shared items</th><th>CPR</th><th>ROAS</th><th>Adds to cart with shared items</th><th>Daily Cost All</th><th>Daily CPR All</th><th>Daily Roas All / ROMI</th></tr></thead>
-    <tbody><?php foreach ($isi as $r): ?><tr>
-      <td><?= e($label($r['t'])) ?></td><td><?= rp($r['sc']) ?></td><td><?= ps(bagi($r['sc'], $r['ca'])) ?></td><td><?= rp($r['so']) ?></td><td><?= an($r['sp']) ?></td><td><?= rp(bagi($r['sc'], $r['sp'])) ?></td><td><?= $pl(bagi($r['so'], $r['sc']), $avgS) ?></td>
-      <td><?= rp($r['mc']) ?></td><td><?= rp($r['mo']) ?></td><td><?= an($r['mp']) ?></td><td><?= rp(bagi($r['mc'], $r['mp'])) ?></td><td><?= $pl(bagi($r['mo'], $r['mc']), $avgM) ?></td><td><?= an($r['ma']) ?></td>
-      <td><?= rp($r['ca']) ?></td><td><?= rp(bagi($r['ca'], $r['sp'])) ?></td><td><?= $pl(bagi($r['so'], $r['ca']), $avgA) ?></td></tr><?php endforeach; ?></tbody>
+    <tbody><?php foreach ($HARI as $r): $sh = ($r['sc'] || $r['so']); $mt = (bool)$r['mc']; $lewat = $r['t'] <= date('Y-m-d');
+      $kos = function ($ok, $v) { return $ok ? $v : '<span class="kosong">—</span>'; }; ?>
+    <tr class="<?= !$sh && !$mt ? 'baris-kosong' : '' ?>">
+      <td><?= e($label($r['t'])) ?><?= ($mt && !$sh && $lewat) ? ' <span class="lenc-w">Shopee belum diisi</span>' : '' ?></td>
+      <td><?= $kos($sh, rp($r['sc'])) ?></td><td><?= $kos($sh, ps(bagi($r['sc'], $r['ca']))) ?></td><td><?= $kos($sh, rp($r['so'])) ?></td><td><?= $kos($sh, an($r['sp'])) ?></td><td><?= $kos($sh, rp(bagi($r['sc'], $r['sp']))) ?></td><td><?= $kos($sh, $pl(bagi($r['so'], $r['sc']), $avgS)) ?></td>
+      <td><?= $kos($mt, rp($r['mc'])) ?></td><td><?= $kos($mt, rp($r['mo'])) ?></td><td><?= $kos($mt, an($r['mp'])) ?></td><td><?= $kos($mt, rp(bagi($r['mc'], $r['mp']))) ?></td><td><?= $kos($mt, $pl(bagi($r['mo'], $r['mc']), $avgM)) ?></td><td><?= $kos($mt, an($r['ma'])) ?></td>
+      <td><?= $kos($sh || $mt, rp($r['ca'])) ?></td><td><?= $kos($sh, rp(bagi($r['ca'], $r['sp']))) ?></td><td><?= $kos($sh, $pl(bagi($r['so'], $r['ca']), $avgA)) ?></td>
+    </tr><?php endforeach; ?></tbody>
     <?php if ($isi): ?><tfoot><tr><td><?= e($NB[$bl] . ' ' . $th) ?></td><td><?= rp($TOT['sc']) ?></td><td><?= ps(bagi($TOT['sc'], $TOT['ca'])) ?></td><td><?= rp($TOT['so']) ?></td><td><?= an($TOT['sp']) ?></td><td><?= rp(bagi($TOT['sc'], $TOT['sp'])) ?></td><td><?= rs($avgS) ?></td>
       <td><?= rp($TOT['mc']) ?></td><td><?= rp($TOT['mo']) ?></td><td><?= an($TOT['mp']) ?></td><td><?= rp(bagi($TOT['mc'], $TOT['mp'])) ?></td><td><?= rs($avgM) ?></td><td><?= an($TOT['ma']) ?></td>
       <td><?= rp($TOT['ca']) ?></td><td><?= rp(bagi($TOT['ca'], $TOT['sp'])) ?></td><td><?= rs($avgA) ?></td></tr></tfoot><?php endif; ?>
