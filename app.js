@@ -1713,10 +1713,13 @@ try { (function () {
   const ta = panel.querySelector("textarea");
   const tombolKirim = Array.from(panel.querySelectorAll("button")).find(b => /kirim/i.test(b.textContent));
   function tertunda() {
-    const semua = Array.from(panel.querySelectorAll("button[data-act]")).filter(b => b.dataset.act !== "skip" && !b.disabled && b.offsetParent !== null && /jalan|run|eksekusi/i.test(b.textContent + " " + b.dataset.act));
+    const semua = Array.from(panel.querySelectorAll('button[data-act="run"], button[data-act="runall"]')).filter(b => !b.disabled && b.offsetParent !== null);
     if (!semua.length) return [];
     const msgTerakhir = semua[semua.length - 1].closest(".msg") || panel;
-    return semua.filter(b => (b.closest(".msg") || panel) === msgTerakhir);
+    const grup = semua.filter(b => (b.closest(".msg") || panel) === msgTerakhir);
+    const semuaSekaligus = grup.find(b => b.dataset.act === "runall");
+    if (semuaSekaligus) { semuaSekaligus._daftar = grup.filter(b => b.dataset.act === "run"); return [semuaSekaligus]; }   // tekan sekali saja, tidak dobel
+    return grup.filter(b => b.dataset.act === "run");
   }
   const st = document.createElement("style");
   st.textContent = `.kj-bg{position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.35);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;animation:kjIn .18s ease}
@@ -1743,7 +1746,8 @@ try { (function () {
     if (!POLA.test(ta.value || "")) return;
     const tb = tertunda(); if (!tb.length) return;      // tidak ada usulan tertunda → biarkan ke AI
     e.preventDefault(); e.stopImmediatePropagation();
-    const daftar = tb.map(b => { const kartu = b.closest("[class*='act'], li, .card, div") || b.parentElement; return (kartu.textContent || "").replace(/\s+/g, " ").replace(/(Jalankan|Lewati|Skip)/gi, "").trim().slice(0, 160) || b.textContent.trim(); });
+    const tampil = tb[0]._daftar && tb[0]._daftar.length ? tb[0]._daftar : tb;
+    const daftar = tampil.map(b => { const kartu = b.closest("[class*='act'], li, .card, div") || b.parentElement; return (kartu.textContent || "").replace(/\s+/g, " ").replace(/(Jalankan|Lewati|Skip)/gi, "").trim().slice(0, 160) || b.textContent.trim(); });
     if (!(await konfirmasi(daftar))) return;
     ta.value = ""; ta.dispatchEvent(new Event("input", { bubbles: true }));
     for (const b of tb) { b.click(); await new Promise(r => setTimeout(r, 400)); }
