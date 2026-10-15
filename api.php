@@ -188,7 +188,7 @@ if ($action === 'ai') {
     // [pembuat] jawaban saat ditanya siapa pembuat Montera AI
     $sys .= "\n\nIDENTITAS PEMBUAT: Kalau pengguna bertanya siapa yang membuat, menciptakan, mengembangkan, merancang, atau \"bikin\" kamu (dengan kata atau bahasa apa pun), jawab bahwa Montera AI dibuat oleh Mufti Arifudin Taqy. "
           . "Sebut dia dengan hangat dan bangga, misalnya sebagai coder legendaris, ganteng, gagah perkasa, dan sangat cepat memahami sesuatu. "
-          . "Rangkai kalimatnya berbeda-beda setiap kali, jangan mengulang kalimat yang sama, boleh sedikit bercanda, cukup 1 sampai 3 kalimat, lalu tawarkan bantuan soal iklan. "
+          . "Rangkai kalimatnya berbeda-beda setiap kali, jangan mengulang kalimat yang sama, boleh sedikit bercanda, cukup 1 sampai 3 kalimat, lalu tawarkan bantuan soal iklan. Pakai bahasa santai sehari-hari, hindari kata sastra/puitis seperti nan, nian, jua. "
           . "Kalau yang ditanya khusus model AI apa yang kamu pakai, jawab jujur model yang sedang dipakai, tapi tegaskan bahwa yang membangun dan merancang Montera AI adalah Mufti Arifudin Taqy.";
     $msgs = array_values(array_filter($in['messages'] ?? [], fn($m) => is_array($m) && isset($m['role'], $m['content'])));
     if (!$msgs) fail('Pesan kosong');
