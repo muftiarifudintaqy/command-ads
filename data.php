@@ -54,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("DELETE FROM meta_harian WHERE akun_id = ?")->execute([$a['id']]);
             $db->prepare("DELETE FROM akun WHERE id = ?")->execute([$a['id']]);
             $db->prepare("INSERT INTO log_ubah (pengguna, merek, tanggal, kolom, lama, baru) VALUES (?,?,CURDATE(),'hapus_akun',?,NULL)")->execute([$user, $a['merek'], substr($a['nama'] . ' ' . $a['act_id'], 0, 40)]);
-            $ks = !empty($a['sheet_gid']) ? ma_post_sheet(['jenis' => 'hapus_tab', 'merek' => $a['merek'], 'gid' => (int)$a['sheet_gid'], 'nama_lama' => $a['nama']]) : '';
+            if (!empty($a['sheet_gid'])) ma_latar('post', ['data' => ['jenis' => 'hapus_tab', 'merek' => $a['merek'], 'gid' => (int)$a['sheet_gid'], 'nama_lama' => $a['nama']]]); $ks = '';
             $jawab(['ok' => true, 'sheet' => $ks]);
         }
         if ($aksi === 'tab_baru') {
@@ -62,8 +62,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $q = $db->prepare("SELECT nama FROM akun WHERE merek = ? AND nama LIKE 'Akun Baru%'"); $q->execute([$mk]); $ada = array_column($q->fetchAll(), 'nama');
             $nama = 'Akun Baru'; for ($i = 2; in_array($nama, $ada, true); $i++) $nama = 'Akun Baru ' . $i;
             $db->prepare("INSERT INTO akun (merek, nama, act_id, token, metode, grup, aktif, urutan) VALUES (?,?,NULL,'prepare',?,NULL,1,99)")->execute([$mk, $nama, $mk === 'skinlyfe' ? 'skinlyfe' : 'prepare']);
-            $id = (int)$db->lastInsertId(); $bt = ma_buat_tab($id);
-            $jawab(['ok' => true, 'id' => $id, 'tab' => $bt['ok'] ? 'tab dibuat di sheet ✓' : 'tab sheet belum dibuat: ' . $bt['pesan']]);
+            $id = (int)$db->lastInsertId(); ma_latar('buat_tab', ['id' => $id]);
+            $jawab(['ok' => true, 'id' => $id, 'tab' => 'tab di sheet sedang dibuat']);
         }
         if ($aksi === 'akun') {
             $id = (int)($in['id'] ?? 0); $mk = ($in['merek'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
@@ -76,9 +76,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($id) {
                 $q = $db->prepare("SELECT nama, sheet_gid, isi_sheet FROM akun WHERE id = ?"); $q->execute([$id]); $lama = $q->fetch() ?: [];
                 $v[] = $id; $db->prepare("UPDATE akun SET merek=?, nama=?, act_id=?, token=?, metode=?, cpas_only=?, grup=?, aktif=?, sheet_gid=? WHERE id=?")->execute($v);
-                if (!empty($lama['sheet_gid']) && $lama['nama'] !== $nama) ma_post_sheet(['jenis' => 'ganti_nama', 'merek' => $mk, 'gid' => (int)$lama['sheet_gid'], 'nama_lama' => $lama['nama'], 'nama' => $nama, 'judul' => (int)$lama['isi_sheet']]);
+                if (!empty($lama['sheet_gid']) && $lama['nama'] !== $nama) ma_latar('post', ['data' => ['jenis' => 'ganti_nama', 'merek' => $mk, 'gid' => (int)$lama['sheet_gid'], 'nama_lama' => $lama['nama'], 'nama' => $nama, 'judul' => (int)$lama['isi_sheet']]]);
             }
-            else { $db->prepare("INSERT INTO akun (merek, nama, act_id, token, metode, cpas_only, grup, aktif, sheet_gid, urutan) VALUES (?,?,?,?,?,?,?,?,?,99)")->execute($v); $id = (int)$db->lastInsertId(); $bt = ma_buat_tab($id); $jawab(['ok' => true, 'id' => $id, 'tab' => $bt['ok'] ? 'Tab baru dibuat di sheet ✓' : 'Tab sheet belum dibuat: ' . $bt['pesan']]); }
+            else { $db->prepare("INSERT INTO akun (merek, nama, act_id, token, metode, cpas_only, grup, aktif, sheet_gid, urutan) VALUES (?,?,?,?,?,?,?,?,?,99)")->execute($v); $id = (int)$db->lastInsertId(); ma_latar('buat_tab', ['id' => $id]); $jawab(['ok' => true, 'id' => $id, 'tab' => 'Tab di sheet sedang dibuat']); }
             $jawab(['ok' => true, 'id' => $id]);
         }
         if ($aksi === 'tarik') {
@@ -86,10 +86,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $q = $db->prepare("SELECT * FROM akun WHERE id = ?"); $q->execute([(int)($in['id'] ?? 0)]); $a = $q->fetch();
             if (!$a) $jawab(['ok' => false, 'pesan' => 'Akun tidak ditemukan']);
             if (empty($a['act_id'])) $jawab(['ok' => false, 'pesan' => 'Isi ID akun iklan dulu di Pengaturan akun.']);
-            $n = 0; $t = date('Y-m-01'); $kemarin = date('Y-m-d', strtotime('-1 day'));
-            for (; $t <= $kemarin; $t = date('Y-m-d', strtotime($t . ' +1 day'))) { $m = ma_meta_hari($a, $t); if (array_filter($m)) { ma_simpan_meta((int)$a['id'], $t, $m); $n++; } }
-            $ks = !empty($a['isi_sheet']) ? ' ' . ma_kirim_sheet_akun_banyak((int)$a['id'], date('Y-m-01'), $kemarin) : '';
-            $jawab(['ok' => true, 'pesan' => "$n hari terisi dari Meta." . $ks]);
+            $db->prepare("UPDATE akun SET status_tarik = 'Menarik data Meta bulan ini…' WHERE id = ?")->execute([$a['id']]);
+            ma_latar('tarik', ['id' => (int)$a['id']]);
+            $jawab(['ok' => true, 'pesan' => 'Data Meta bulan ini sedang ditarik. Tabel akan terisi sendiri dalam beberapa detik.']);
         }
         $jawab(['ok' => false, 'pesan' => 'Aksi tidak dikenal']);
     } catch (Throwable $e) { $jawab(['ok' => false, 'pesan' => $e->getMessage()]); }
@@ -100,7 +99,7 @@ if (isset($_GET['ping'])) {
     header('Content-Type: application/json');
     $mk = ($_GET['merk'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
     $q = $db->prepare("SELECT CONCAT(IFNULL((SELECT MAX(diubah_at) FROM shopee_harian WHERE merek = ?), ''), '|',
-        IFNULL((SELECT MAX(m.diambil_at) FROM meta_harian m JOIN akun k ON k.id = m.akun_id WHERE k.merek = ?), ''), '|', (SELECT COUNT(*) FROM akun))");
+        IFNULL((SELECT MAX(m.diambil_at) FROM meta_harian m JOIN akun k ON k.id = m.akun_id WHERE k.merek = ?), ''), '|', (SELECT CONCAT(COUNT(*), '-', IFNULL(SUM(sheet_gid),0), '-', IFNULL(MAX(CHAR_LENGTH(IFNULL(status_tarik,''))),0)) FROM akun))");
     $q->execute([$mk, $mk]); echo json_encode(['v' => $q->fetchColumn()]); exit;
 }
 /* ===================== DATA ===================== */
@@ -337,7 +336,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
     <label><input type="checkbox" id="sCpas" <?= !empty($ak['cpas_only']) ? 'checked' : '' ?>> hanya katalog</label>
     <label><input type="checkbox" id="sAktif" <?= !isset($ak['aktif']) || $ak['aktif'] ? 'checked' : '' ?>> aktif</label>
     <button class="btn" id="sSimpan" type="button">Simpan</button><button class="btn abu" id="sHapus" type="button" style="color:#b91c1c">Hapus akun</button>
-    <span class="st" id="sPesan"><?= empty($ak['act_id']) ? 'Isi ID akun iklan supaya data Meta terisi otomatis.' : '' ?></span>
+    <span class="st" id="sPesan"><?= empty($ak['act_id']) ? 'Isi ID akun iklan supaya data Meta terisi otomatis.' : e($ak['status_tarik'] ?? '') ?></span>
   </div>
   <script>
   (function () {
@@ -360,7 +359,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
               cpas_only: $('sCpas').checked ? 1 : 0, aktif: $('sAktif').checked ? 1 : 0, sheet_gid: <?= (int)($ak['sheet_gid'] ?? 0) ?> }).then(function (h) {
         if (!h.ok) { $('sPesan').textContent = h.pesan; return; }
         var act = $('sAct').value.trim();
-        if (act && act !== actLama) { $('sPesan').textContent = 'Tersimpan, menarik data Meta bulan ini…'; kirim({ aksi: 'tarik', id: <?= (int)$akunId ?> }).then(function (x) { $('sPesan').textContent = x.pesan; setTimeout(function () { location.href = location.href.replace(/&baru=1/, ''); }, 1200); }); }
+        if (act && act !== actLama) { $('sPesan').textContent = 'Tersimpan, menarik data Meta bulan ini…'; kirim({ aksi: 'tarik', id: <?= (int)$akunId ?> }).then(function (x) { location.href = location.href.replace(/&baru=1/, ''); }); }
         else location.href = location.href.replace(/&baru=1/, '');
       });
     };
