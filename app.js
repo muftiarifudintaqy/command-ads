@@ -1702,8 +1702,7 @@ try { (function () {
     };
   }
   tRiw.addEventListener("click", buka);
-  new Image().src = 'api.php?action=jslog&riwayat=aktif&t=' + Date.now();
-})(); } catch (e) { console.error('[riwayat-chat]', e); new Image().src = 'api.php?action=jslog&riwayat=ERROR&pesan=' + encodeURIComponent(String(e && e.stack || e).slice(0, 300)) + '&t=' + Date.now(); }
+})(); } catch (e) { console.error('[riwayat-chat]', e); }
 
 // ---------- [ketik-jalankan] ketik "jalankan" = tekan tombol Jalankan usulan terakhir, dengan konfirmasi ----------
 try { (function () {
