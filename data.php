@@ -186,6 +186,9 @@ table.lap td{padding-left:9px!important;padding-right:9px!important}
 .mode-report .atas,.mode-report .lembar,.mode-report #bReport,.mode-report #bSalin{display:none!important}
 .mode-report{background:#fff!important}.mode-report .isi{max-width:none!important;margin:0!important;padding:14px 18px!important;animation:none!important}
 .mode-report .tabel{overflow:visible!important;max-height:none!important}.mode-report tr.baris-kosong{display:none}
+/* [warna-romi] sama dengan sheet: <2,5 merah, 2,5-2,99 hijau, >=3 biru */
+.rw{display:inline-block;min-width:46px;padding:2px 8px;border-radius:7px;font-weight:700;text-align:center}
+.rw-m{background:#fde2e2;color:#b91c1c}.rw-h{background:#dcf5ea;color:#047857}.rw-b{background:#dbeafe;color:#1d4ed8}
 /* [pas-semua] */
 table.lap thead tr:first-child>*:nth-child(3),table.lap thead tr:first-child>*:nth-child(4),
 table.lap thead tr:last-child>*:nth-child(8),table.lap thead tr:last-child>*:nth-child(14),
@@ -288,13 +291,14 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
   <div class="tabel"><table>
     <thead><tr><th></th><th colspan="6">SHOPEE</th><th colspan="6">CPAS META</th><th colspan="3">Daily All Platform</th></tr>
     <tr><th>Tanggal</th><th>Cost</th><th>Presentase Shopee Ads</th><th>Omset</th><th>Pesanan</th><th>CPR</th><th>ROAS</th><th>Cost</th><th>Omset</th><th>Purchases with shared items</th><th>CPR</th><th>ROAS</th><th>Adds to cart with shared items</th><th>Daily Cost All</th><th>Daily CPR All</th><th>Daily Roas All / ROMI</th></tr></thead>
+    <?php $romiW = function ($v) { if ($v === null) return '–'; $k = $v < 2.5 ? 'rw-m' : ($v < 3 ? 'rw-h' : 'rw-b'); return '<span class="rw ' . $k . '">' . rs($v) . '</span>'; }; ?>
     <tbody><?php foreach ($HARI as $r): $sh = ($r['sc'] || $r['so']); $mt = (bool)$r['mc']; $lewat = $r['t'] <= date('Y-m-d');
       $kos = function ($ok, $v) { return $ok ? $v : '<span class="kosong">—</span>'; }; ?>
     <tr class="<?= !$sh && !$mt ? 'baris-kosong' : '' ?>">
       <td><?= e($label($r['t'])) ?><?= ($mt && !$sh && $lewat) ? ' <span class="lenc-w">Shopee belum diisi</span>' : '' ?></td>
-      <td><?= $kos($sh, rp($r['sc'])) ?></td><td><?= $kos($sh, ps(bagi($r['sc'], $r['ca']))) ?></td><td><?= $kos($sh, rp($r['so'])) ?></td><td><?= $kos($sh, an($r['sp'])) ?></td><td><?= $kos($sh, rp(bagi($r['sc'], $r['sp']))) ?></td><td><?= $kos($sh, $pl($r['sr'] ?? bagi($r['so'], $r['sc']), $avgS)) ?></td>
-      <td><?= $kos($mt, rp($r['mc'])) ?></td><td><?= $kos($mt, rp($r['mo'])) ?></td><td><?= $kos($mt, an($r['mp'])) ?></td><td><?= $kos($mt, rp(bagi($r['mc'], $r['mp']))) ?></td><td><?= $kos($mt, $pl(bagi($r['mo'], $r['mc']), $avgM)) ?></td><td><?= $kos($mt, an($r['ma'])) ?></td>
-      <td><?= $kos($sh || $mt, rp($r['ca'])) ?></td><td><?= $kos($sh, rp(bagi($r['ca'], $r['sp']))) ?></td><td><?= $kos($sh, $pl(bagi($r['so'], $r['ca']), $avgA)) ?></td>
+      <td><?= $kos($sh, rp($r['sc'])) ?></td><td><?= $kos($sh, ps(bagi($r['sc'], $r['ca']))) ?></td><td><?= $kos($sh, rp($r['so'])) ?></td><td><?= $kos($sh, an($r['sp'])) ?></td><td><?= $kos($sh, rp(bagi($r['sc'], $r['sp']))) ?></td><td><?= $kos($sh, rs($r['sr'] ?? bagi($r['so'], $r['sc']))) ?></td>
+      <td><?= $kos($mt, rp($r['mc'])) ?></td><td><?= $kos($mt, rp($r['mo'])) ?></td><td><?= $kos($mt, an($r['mp'])) ?></td><td><?= $kos($mt, rp(bagi($r['mc'], $r['mp']))) ?></td><td><?= $kos($mt, rs(bagi($r['mo'], $r['mc']))) ?></td><td><?= $kos($mt, an($r['ma'])) ?></td>
+      <td><?= $kos($sh || $mt, rp($r['ca'])) ?></td><td><?= $kos($sh, rp(bagi($r['ca'], $r['sp']))) ?></td><td><?= $kos($sh, $romiW(bagi($r['so'], $r['ca']))) ?></td>
     </tr><?php endforeach; ?></tbody>
     <?php if ($isi): ?><tfoot><tr><td><?= e($NB[$bl] . ' ' . $th) ?></td><td><?= rp($TOT['sc']) ?></td><td><?= ps(bagi($TOT['sc'], $TOT['ca'])) ?></td><td><?= rp($TOT['so']) ?></td><td><?= an($TOT['sp']) ?></td><td><?= rp(bagi($TOT['sc'], $TOT['sp'])) ?></td><td><?= rs($avgS) ?></td>
       <td><?= rp($TOT['mc']) ?></td><td><?= rp($TOT['mo']) ?></td><td><?= an($TOT['mp']) ?></td><td><?= rp(bagi($TOT['mc'], $TOT['mp'])) ?></td><td><?= rs($avgM) ?></td><td><?= an($TOT['ma']) ?></td>
