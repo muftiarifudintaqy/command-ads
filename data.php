@@ -27,9 +27,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $tgl = (string)($in['tanggal'] ?? '');
             $kol = (string)($in['kolom'] ?? '');
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $tgl) || $tgl > date('Y-m-d')) $jawab(['ok' => false, 'pesan' => 'Tanggal tidak valid']);
-            if (!in_array($kol, ['cost', 'omset', 'pesanan', 'catatan'], true)) $jawab(['ok' => false, 'pesan' => 'Kolom tidak valid']);
+            if (!in_array($kol, ['cost', 'omset', 'pesanan', 'roas', 'catatan'], true)) $jawab(['ok' => false, 'pesan' => 'Kolom tidak valid']);
             $raw = trim((string)($in['nilai'] ?? ''));
-            $nilai = $kol === 'catatan' ? ($raw === '' ? null : mb_substr($raw, 0, 250)) : ($raw === '' ? null : (int)preg_replace('/\D/', '', $raw));
+            $nilai = $kol === 'roas' ? ($raw === '' || !is_numeric(str_replace(',', '.', $raw)) ? null : round((float)str_replace(',', '.', $raw), 2)) : ($kol === 'catatan' ? ($raw === '' ? null : mb_substr($raw, 0, 250)) : ($raw === '' ? null : (int)preg_replace('/\D/', '', $raw)));
             $q = $db->prepare("SELECT $kol FROM shopee_harian WHERE merek = ? AND tanggal = ?"); $q->execute([$mk, $tgl]); $lama = $q->fetchColumn();
             $db->prepare("INSERT INTO shopee_harian (merek, tanggal, $kol, sumber, diubah_oleh, diubah_at) VALUES (?,?,?,'sistem',?,NOW())
                 ON DUPLICATE KEY UPDATE $kol = VALUES($kol), sumber = 'sistem', diubah_oleh = VALUES(diubah_oleh), diubah_at = NOW()")->execute([$mk, $tgl, $nilai, $user]);
@@ -121,7 +121,7 @@ $ME = []; foreach ($q->fetchAll() as $r) $ME[$r['tanggal']] = $r;
 $HARI = []; $TOT = ['sc' => 0, 'so' => 0, 'sp' => 0, 'mc' => 0, 'mo' => 0, 'mp' => 0, 'ma' => 0, 'ca' => 0, 'n' => 0];
 for ($d = 1; $d <= $jml; $d++) {
     $t = sprintf('%04d-%02d-%02d', $th, $bl, $d); $s = $SH[$t] ?? []; $m = $ME[$t] ?? [];
-    $r = ['t' => $t, 'sc' => (float)($s['cost'] ?? 0), 'so' => (float)($s['omset'] ?? 0), 'sp' => (float)($s['pesanan'] ?? 0),
+    $r = ['t' => $t, 'sc' => (float)($s['cost'] ?? 0), 'so' => (float)($s['omset'] ?? 0), 'sp' => (float)($s['pesanan'] ?? 0), 'sr' => (isset($s['roas']) && $s['roas'] !== null) ? (float)$s['roas'] : null,
           'mc' => (float)($m['s'] ?? 0), 'mo' => (float)($m['o'] ?? 0), 'mp' => (float)($m['p'] ?? 0), 'ma' => (float)($m['a'] ?? 0)];
     $r['ca'] = $r['sc'] + $r['mc']; $r['isi'] = ($r['sc'] || $r['so'] || $r['mc']);
     $HARI[$t] = $r;
@@ -232,7 +232,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
 ?>
   <?php if ($a): ?>
   <?php $rk = '*Laporan ' . ucfirst($merk) . ' — ' . $label($a['t']) . "*\n"
-      . 'Omset Shopee: ' . rp($a['so']) . "\n" . 'Pesanan: ' . an($a['sp']) . "\n" . 'ROAS Shopee: ' . rs(bagi($a['so'], $a['sc'])) . "\n"
+      . 'Omset Shopee: ' . rp($a['so']) . "\n" . 'Pesanan: ' . an($a['sp']) . "\n" . 'ROAS Shopee: ' . rs(($a['sr'] ?? bagi($a['so'], $a['sc']))) . "\n"
       . 'Omset CPAS Meta: ' . rp($a['mo']) . ' · ROAS ' . rs(bagi($a['mo'], $a['mc'])) . "\n"
       . 'Daily Cost All: ' . rp($a['ca']) . "\n" . 'Daily CPR All: ' . rp(bagi($a['ca'], $a['sp'])) . "\n" . 'Daily Roas All / ROMI: ' . rs($romi($a)) . "\n\n"
       . '*Total ' . $NB[$bl] . ' ' . $th . "*\n" . 'Omset Shopee: ' . rp($TOT['so']) . "\n" . 'Pesanan: ' . an($TOT['sp']) . "\n"
@@ -278,7 +278,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
   })();
   </script>
   <div class="kartu">
-    <div class="k"><div class="t">Omset Shopee</div><div class="b"><?= rp($a['so']) ?><?= $dl($a['so'], $b['so'] ?? null) ?></div><div class="s"><?= an($a['sp']) ?> pesanan · ROAS <?= rs(bagi($a['so'], $a['sc'])) ?></div></div>
+    <div class="k"><div class="t">Omset Shopee</div><div class="b"><?= rp($a['so']) ?><?= $dl($a['so'], $b['so'] ?? null) ?></div><div class="s"><?= an($a['sp']) ?> pesanan · ROAS <?= rs(($a['sr'] ?? bagi($a['so'], $a['sc']))) ?></div></div>
     <div class="k"><div class="t">Omset CPAS Meta</div><div class="b"><?= rp($a['mo']) ?><?= $dl($a['mo'], $b['mo'] ?? null) ?></div><div class="s"><?= an($a['mp']) ?> purchase · ROAS <?= rs(bagi($a['mo'], $a['mc'])) ?></div></div>
     <div class="k"><div class="t">Daily Cost All</div><div class="b"><?= rp($a['ca']) ?><?= $dl($a['ca'], $b['ca'] ?? null, true) ?></div><div class="s">Shopee <?= rp($a['sc']) ?> · Meta <?= rp($a['mc']) ?></div></div>
     <div class="k"><div class="t">Daily Roas All / ROMI</div><div class="b"><?= rs($romi($a)) ?><?= $dl($romi($a), $romi($b)) ?></div><div class="s">Daily CPR All <?= rp(bagi($a['ca'], $a['sp'])) ?></div></div>
@@ -292,7 +292,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
       $kos = function ($ok, $v) { return $ok ? $v : '<span class="kosong">—</span>'; }; ?>
     <tr class="<?= !$sh && !$mt ? 'baris-kosong' : '' ?>">
       <td><?= e($label($r['t'])) ?><?= ($mt && !$sh && $lewat) ? ' <span class="lenc-w">Shopee belum diisi</span>' : '' ?></td>
-      <td><?= $kos($sh, rp($r['sc'])) ?></td><td><?= $kos($sh, ps(bagi($r['sc'], $r['ca']))) ?></td><td><?= $kos($sh, rp($r['so'])) ?></td><td><?= $kos($sh, an($r['sp'])) ?></td><td><?= $kos($sh, rp(bagi($r['sc'], $r['sp']))) ?></td><td><?= $kos($sh, $pl(bagi($r['so'], $r['sc']), $avgS)) ?></td>
+      <td><?= $kos($sh, rp($r['sc'])) ?></td><td><?= $kos($sh, ps(bagi($r['sc'], $r['ca']))) ?></td><td><?= $kos($sh, rp($r['so'])) ?></td><td><?= $kos($sh, an($r['sp'])) ?></td><td><?= $kos($sh, rp(bagi($r['sc'], $r['sp']))) ?></td><td><?= $kos($sh, $pl($r['sr'] ?? bagi($r['so'], $r['sc']), $avgS)) ?></td>
       <td><?= $kos($mt, rp($r['mc'])) ?></td><td><?= $kos($mt, rp($r['mo'])) ?></td><td><?= $kos($mt, an($r['mp'])) ?></td><td><?= $kos($mt, rp(bagi($r['mc'], $r['mp']))) ?></td><td><?= $kos($mt, $pl(bagi($r['mo'], $r['mc']), $avgM)) ?></td><td><?= $kos($mt, an($r['ma'])) ?></td>
       <td><?= $kos($sh || $mt, rp($r['ca'])) ?></td><td><?= $kos($sh, rp(bagi($r['ca'], $r['sp']))) ?></td><td><?= $kos($sh, $pl(bagi($r['so'], $r['ca']), $avgA)) ?></td>
     </tr><?php endforeach; ?></tbody>
@@ -358,7 +358,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
       <td class="h h-pct"></td>
       <td><input class="inp" data-k="omset" inputmode="numeric" placeholder="—" value="<?= $nilai('omset') ?>" <?= $depan ?>></td>
       <td><input class="inp" data-k="pesanan" inputmode="numeric" placeholder="—" value="<?= $nilai('pesanan') ?>" <?= $depan ?>></td>
-      <td class="h h-cpr"></td><td class="h h-roas"></td>
+      <td class="h h-cpr"></td><td><input class="inp" data-k="roas" inputmode="decimal" placeholder="—" style="width:84px" value="<?= isset($s['roas']) && $s['roas'] !== null ? e(number_format((float)$s['roas'], 2, ',', '')) : '' ?>" <?= $depan ?>></td>
       <td><input class="inp cat" data-k="catatan" placeholder="—" value="<?= e($s['catatan'] ?? '') ?>" <?= $depan ?>></td>
       <td class="st"><?= !empty($s['diubah_at']) ? (($s['sumber'] === 'sheet' ? '<span class="lenc">sheet</span> ' : e($s['diubah_oleh']) . ' · ') . e(date('d/m H:i', strtotime($s['diubah_at'])))) : '' ?></td>
     </tr><?php endforeach; ?></tbody>
@@ -371,7 +371,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
       var c = n(tr.querySelector('[data-k="cost"]').value), o = n(tr.querySelector('[data-k="omset"]').value), p = n(tr.querySelector('[data-k="pesanan"]').value), mc = +tr.dataset.mc || 0;
       tr.querySelector('.h-pct').textContent = c != null && (c + mc) ? (c / (c + mc) * 100).toFixed(2).replace('.', ',') + '%' : '';
       tr.querySelector('.h-cpr').textContent = c != null && p ? rp(c / p) : '';
-      tr.querySelector('.h-roas').textContent = c && o != null ? (o / c).toFixed(2).replace('.', ',') : '';
+      
     }
     document.querySelectorAll('table.lsh tbody tr').forEach(function (tr) { hitung(tr); tr.addEventListener('input', function () { hitung(tr); }); });
   })();
@@ -665,7 +665,7 @@ function tabBaru() {
 function kirim(data) { return fetch('data.php', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF': CSRF }, body: JSON.stringify(data) }).then(function (r) { return r.json(); }); }
 document.querySelectorAll('input.inp').forEach(function (el) {
   var awal = el.value;
-  if (el.dataset.k !== 'catatan') el.addEventListener('input', function () { var d = el.value.replace(/\D/g, ''); el.value = d ? Number(d).toLocaleString('id-ID') : ''; });
+  if (el.dataset.k !== 'catatan' && el.dataset.k !== 'roas') el.addEventListener('input', function () { var d = el.value.replace(/\D/g, ''); el.value = d ? Number(d).toLocaleString('id-ID') : ''; });
   el.addEventListener('change', function () {
     var tr = el.closest('tr'), st = tr.querySelector('.st');
     st.className = 'st'; st.textContent = 'menyimpan…';

@@ -53,6 +53,8 @@ foreach ((array)($in['baris'] ?? []) as $b) {
     if ($c === null && $o === null && $p === null && !$ada->fetchColumn()) continue;
     $oleh = 'sheet' . (!empty($in['email']) ? ':' . substr((string)$in['email'], 0, 60) : '');
     $simpan->execute([$mk, $tgl, $c, $o, $p, $oleh]);
+    $rr = str_replace(['.', ','], ['', '.'], trim((string)($b['roas'] ?? '')));
+    if ($rr !== '' && is_numeric($rr)) $db->prepare("INSERT INTO shopee_harian (merek, tanggal, roas, sumber, diubah_oleh, diubah_at) VALUES (?,?,?,'sheet',?,NOW()) ON DUPLICATE KEY UPDATE roas = VALUES(roas)")->execute([$mk, $tgl, round((float)$rr, 2), $oleh]);
     $log->execute([$oleh, $mk, $tgl, 'sheet', null, json_encode(['cost' => $c, 'omset' => $o, 'pesanan' => $p])]);
     $n++;
 }
