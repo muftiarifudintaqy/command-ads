@@ -253,7 +253,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
         var r = Math.min(window.innerWidth / isiL.scrollWidth, window.innerHeight / isiL.scrollHeight, 1);
         isiL.style.zoom = Math.max(0.4, r); return;
       }
-      isiL.style.zoom = 1; tblL.style.zoom = 1;
+      isiL.style.zoom = 1; tblL.style.zoom = 1; isiL.style.maxWidth = 'none'; isiL.style.marginLeft = isiL.style.marginRight = '0';
       var hA = (document.querySelector('.atas') || { offsetHeight: 64 }).offsetHeight, hB = (document.querySelector('.lembar') || { offsetHeight: 56 }).offsetHeight;
       var muatTinggi = (window.innerHeight - hA - hB - 12) / (isiL.scrollHeight + 8), muatLebar = tabelL.clientWidth / tblL.scrollWidth;
       isiL.style.zoom = Math.max(0.5, Math.min(1, muatTinggi, muatLebar));
@@ -698,7 +698,7 @@ if (f) {
     var tb = pilih(); if (!tb) return;
     var wd = tb.parentElement, isi = wd.parentElement;
     tb.classList.add('lap2'); wd.style.maxHeight = 'none'; wd.style.overflowX = 'hidden';
-    isi.style.zoom = 1; tb.style.zoom = 1;
+    isi.style.zoom = 1; tb.style.zoom = 1; isi.style.maxWidth = 'none'; isi.style.marginLeft = isi.style.marginRight = '0';
     var hA = (document.querySelector('.atas') || { offsetHeight: 64 }).offsetHeight, hB = (document.querySelector('.lembar') || { offsetHeight: 56 }).offsetHeight;
     var tinggi = tb.getBoundingClientRect().bottom - isi.getBoundingClientRect().top + 8;
     isi.style.zoom = Math.max(0.5, Math.min(1, (window.innerHeight - hA - hB - 12) / tinggi, wd.clientWidth / tb.scrollWidth));
