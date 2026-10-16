@@ -179,6 +179,12 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
 .kosong{color:#cbd5e1}.baris-kosong td{color:#94a3b8}.baris-kosong td:first-child{color:#94a3b8!important;font-weight:500}
 .lenc-w{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;background:#fef3c7;color:#b45309;font-size:10.5px;font-weight:600;vertical-align:1px}
 .sd{display:inline-block;margin-left:8px;padding:2px 10px;border-radius:999px;background:color-mix(in srgb,var(--w) 10%,#fff);color:#334155}
+/* [muat-layar] */
+table.lap th{white-space:normal!important;max-width:118px;line-height:1.25;vertical-align:bottom}
+table.lap td{padding-left:9px!important;padding-right:9px!important}
+.mode-report .atas,.mode-report .lembar,.mode-report #bReport,.mode-report #bSalin{display:none!important}
+.mode-report{background:#fff!important}.mode-report .isi{max-width:none!important;margin:0!important;padding:14px 18px!important;animation:none!important}
+.mode-report .tabel{overflow:visible!important;max-height:none!important}.mode-report tr.baris-kosong{display:none}
 /* [segar] tampilan modern */
 body{font-family:'Inter',-apple-system,Segoe UI,Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;
   background:radial-gradient(1100px 520px at 0% -10%,color-mix(in srgb,var(--w) 9%,transparent),transparent 70%),radial-gradient(900px 480px at 100% 0%,color-mix(in srgb,var(--w) 5%,transparent),transparent 70%),#f6f7fb;background-attachment:fixed}
@@ -223,10 +229,32 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
       . '*Total ' . $NB[$bl] . ' ' . $th . "*\n" . 'Omset Shopee: ' . rp($TOT['so']) . "\n" . 'Pesanan: ' . an($TOT['sp']) . "\n"
       . 'Daily Cost All: ' . rp($TOT['ca']) . "\n" . 'Daily Roas All / ROMI: ' . rs($avgA); ?>
   <div class="alat"><div class="ket" style="margin:0">Laporan lengkap terakhir: <b><?= e($label($a['t'])) ?></b> · dibanding hari sebelumnya <span class="sd">Shopee terisi s/d <b><?= e($sdS) ?></b> · CPAS Meta s/d <b><?= e($sdM) ?></b></span></div>
-    <div class="alat-kanan"><button class="btn abu" id="bSalin" type="button">📋 Salin ringkasan</button></div></div>
+    <div class="alat-kanan"><button class="btn abu" id="bReport" type="button">⛶ Mode report</button><button class="btn abu" id="bSalin" type="button">📋 Salin ringkasan</button></div></div>
   <script>
   (function () {
     var RK = <?= json_encode($rk, JSON_UNESCAPED_UNICODE) ?>, NAMA = <?= json_encode('Laporan ' . ucfirst($merk) . ' ' . $NB[$bl] . ' ' . $th) ?>;
+    // [muat-layar] tabel pas selebar layar + mode report satu layar penuh
+    var tabelL = document.querySelector('.isi .tabel'), tblL = tabelL && tabelL.querySelector('table'), isiL = document.querySelector('.isi');
+    if (tblL) tblL.classList.add('lap');
+    function pas() {
+      if (!tblL) return;
+      if (document.body.classList.contains('mode-report')) {
+        tblL.style.zoom = 1; isiL.style.zoom = 1;
+        var r = Math.min(window.innerWidth / isiL.scrollWidth, window.innerHeight / isiL.scrollHeight, 1);
+        isiL.style.zoom = Math.max(0.4, r); return;
+      }
+      isiL.style.zoom = 1; tblL.style.zoom = 1;
+      var w = tabelL.clientWidth / tblL.scrollWidth; tblL.style.zoom = w < 1 ? Math.max(0.55, w) : 1;
+    }
+    window.addEventListener('resize', pas); setTimeout(pas, 60);
+    function keluarReport() { document.body.classList.remove('mode-report'); pas(); }
+    document.getElementById('bReport').onclick = function () {
+      document.body.classList.add('mode-report'); window.scrollTo(0, 0);
+      var fs = document.documentElement.requestFullscreen ? document.documentElement.requestFullscreen() : null;
+      (fs || Promise.resolve()).catch(function () {}).then(function () { setTimeout(pas, 200); });
+    };
+    document.addEventListener('fullscreenchange', function () { if (!document.fullscreenElement) keluarReport(); else setTimeout(pas, 200); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && document.body.classList.contains('mode-report') && !document.fullscreenElement) keluarReport(); });
     document.getElementById('bSalin').onclick = function () {
       (navigator.clipboard ? navigator.clipboard.writeText(RK) : Promise.reject()).then(function () { kabar('Ringkasan sudah disalin. Tinggal tempel di WhatsApp.', 'Tersalin'); }, function () { kabar(RK, 'Salin teks ini'); });
     };
