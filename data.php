@@ -187,6 +187,8 @@ table.lap td{padding-left:9px!important;padding-right:9px!important}
 .mode-report .atas,.mode-report .lembar,.mode-report #bReport,.mode-report #bSalin{display:none!important}
 .mode-report{background:#fff!important}.mode-report .isi{max-width:none!important;margin:0!important;padding:14px 18px!important;animation:none!important}
 .mode-report .tabel{overflow:visible!important;max-height:none!important}.mode-report tr.baris-kosong{display:none}
+/* [pas-semua] */
+table.lap2 th{white-space:normal!important;max-width:118px;line-height:1.25;vertical-align:bottom}
 /* [segar] tampilan modern */
 body{font-family:'Inter',-apple-system,Segoe UI,Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;
   background:radial-gradient(1100px 520px at 0% -10%,color-mix(in srgb,var(--w) 9%,transparent),transparent 70%),radial-gradient(900px 480px at 100% 0%,color-mix(in srgb,var(--w) 5%,transparent),transparent 70%),#f6f7fb;background-attachment:fixed}
@@ -681,5 +683,31 @@ if (f) {
   };
   document.querySelectorAll('button.tarik').forEach(function (b) { b.onclick = function () { b.textContent = 'menarik…'; b.disabled = true; kirim({ aksi: 'tarik', id: JSON.parse(b.closest('tr').dataset.a).id }).then(function (x) { kabar(x.pesan, x.ok ? 'Data ditarik' : 'Belum bisa').then(function () { location.reload(); }); }); }; });
 }
+</script>
+<script>
+/* [pas-semua] semua tab selain Laporan: tabel utama pas satu layar */
+(function () {
+  var hariIni = '<?= date('Y-m-d') ?>';
+  function pilih() {
+    return Array.prototype.slice.call(document.querySelectorAll('table')).filter(function (t) { return !t.classList.contains('lap') && t.rows.length > 2; })
+      .sort(function (a, b) { return b.offsetWidth * b.rows.length - a.offsetWidth * a.rows.length; })[0];
+  }
+  function pas() {
+    if (document.querySelector('table.lap')) return;   // tab Laporan punya pengatur sendiri
+    var tb = pilih(); if (!tb) return;
+    var wd = tb.parentElement, isi = wd.parentElement;
+    tb.classList.add('lap2'); wd.style.maxHeight = 'none'; wd.style.overflowX = 'hidden';
+    Array.prototype.forEach.call(tb.querySelectorAll('tbody tr'), function (tr) {
+      var ins = tr.querySelectorAll('input');
+      var depan = (tr.dataset.t && tr.dataset.t > hariIni) || (ins.length && Array.prototype.every.call(ins, function (x) { return x.disabled; }));
+      if (depan) tr.style.display = 'none';
+    });
+    isi.style.zoom = 1; tb.style.zoom = 1;
+    var hA = (document.querySelector('.atas') || { offsetHeight: 64 }).offsetHeight, hB = (document.querySelector('.lembar') || { offsetHeight: 56 }).offsetHeight;
+    var tinggi = tb.getBoundingClientRect().bottom - isi.getBoundingClientRect().top + 8;
+    isi.style.zoom = Math.max(0.55, Math.min(1, (window.innerHeight - hA - hB - 12) / tinggi, wd.clientWidth / tb.scrollWidth));
+  }
+  window.addEventListener('load', pas); window.addEventListener('resize', pas); setTimeout(pas, 300);
+})();
 </script>
 </body></html>
