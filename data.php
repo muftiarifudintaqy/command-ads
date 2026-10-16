@@ -180,7 +180,7 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
 .lenc-w{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;background:#fef3c7;color:#b45309;font-size:10.5px;font-weight:600;vertical-align:1px}
 .sd{display:inline-block;margin-left:8px;padding:2px 10px;border-radius:999px;background:color-mix(in srgb,var(--w) 10%,#fff);color:#334155}
 /* [muat-layar] */
-.tabel:has(table.lap){max-height:none!important;overflow-x:hidden!important}
+*:has(> table.lap){max-height:none!important;overflow-x:hidden!important}
 table.lap th{white-space:normal!important;max-width:118px;line-height:1.25;vertical-align:bottom}
 table.lap td{padding-left:9px!important;padding-right:9px!important}
 .mode-report .atas,.mode-report .lembar,.mode-report #bReport,.mode-report #bSalin{display:none!important}
@@ -235,7 +235,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
   (function () {
     var RK = <?= json_encode($rk, JSON_UNESCAPED_UNICODE) ?>, NAMA = <?= json_encode('Laporan ' . ucfirst($merk) . ' ' . $NB[$bl] . ' ' . $th) ?>;
     // [muat-layar] tabel pas selebar layar + mode report satu layar penuh
-    var tabelL = document.querySelector('.isi .tabel'), tblL = tabelL && tabelL.querySelector('table'), isiL = document.querySelector('.isi');
+    var tblL = Array.prototype.find.call(document.querySelectorAll('table'), function (t) { return /Daily Roas All/.test((t.tHead || t).textContent); }), tabelL = tblL && tblL.parentElement, isiL = tabelL && tabelL.parentElement;
     if (tblL) tblL.classList.add('lap');
     function pas() {
       if (!tblL) return;
@@ -247,7 +247,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
       isiL.style.zoom = 1; tblL.style.zoom = 1;
       var w = tabelL.clientWidth / tblL.scrollWidth; tblL.style.zoom = w < 1 ? Math.max(0.55, w) : 1;
     }
-    window.addEventListener('resize', pas); setTimeout(pas, 60);
+    window.addEventListener('resize', pas); window.addEventListener('load', pas); setTimeout(pas, 60); setTimeout(pas, 500);
     function keluarReport() { document.body.classList.remove('mode-report'); pas(); }
     var bR = document.getElementById('bReport'); if (bR) bR.onclick = function () {
       document.body.classList.add('mode-report'); window.scrollTo(0, 0);
