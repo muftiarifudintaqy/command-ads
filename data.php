@@ -238,7 +238,12 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
     var tblL = Array.prototype.find.call(document.querySelectorAll('table'), function (t) { return /Daily Roas All/.test((t.tHead || t).textContent); }), tabelL = tblL && tblL.parentElement, isiL = tabelL && tabelL.parentElement;
     if (tblL) tblL.classList.add('lap');
     function pas() {
-      if (!tblL) return;
+      if (!tblL) {
+        tblL = Array.prototype.find.call(document.querySelectorAll('table'), function (t) { return /Daily Roas All/.test((t.tHead || t).textContent); });
+        if (!tblL) return;
+        tabelL = tblL.parentElement; isiL = tabelL.parentElement;
+      }
+      tblL.classList.add('lap');
       if (document.body.classList.contains('mode-report')) {
         tblL.style.zoom = 1; isiL.style.zoom = 1;
         var r = Math.min(window.innerWidth / isiL.scrollWidth, window.innerHeight / isiL.scrollHeight, 1);
