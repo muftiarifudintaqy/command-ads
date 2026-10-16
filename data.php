@@ -187,6 +187,10 @@ table.lap td{padding-left:9px!important;padding-right:9px!important}
 .mode-report{background:#fff!important}.mode-report .isi{max-width:none!important;margin:0!important;padding:14px 18px!important;animation:none!important}
 .mode-report .tabel{overflow:visible!important;max-height:none!important}.mode-report tr.baris-kosong{display:none}
 /* [pas-semua] */
+table.lap thead tr:first-child>*:nth-child(3),table.lap thead tr:first-child>*:nth-child(4),
+table.lap thead tr:last-child>*:nth-child(8),table.lap thead tr:last-child>*:nth-child(14),
+table.lap tbody tr>*:nth-child(8),table.lap tbody tr>*:nth-child(14),
+table.lap tfoot tr>*:nth-child(8),table.lap tfoot tr>*:nth-child(14){border-left:10px solid #3b82f6!important}
 table.lap td,table.lap2 td{padding-top:4px!important;padding-bottom:4px!important}
 table.lap2 input,table.lap2 .sel{padding-top:3px!important;padding-bottom:3px!important;min-height:0!important}
 table.lap2 th{white-space:normal!important;max-width:118px;line-height:1.25;vertical-align:bottom}
@@ -253,7 +257,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
         var r = Math.min(window.innerWidth / isiL.scrollWidth, window.innerHeight / isiL.scrollHeight, 1);
         isiL.style.zoom = Math.max(0.4, r); return;
       }
-      isiL.style.zoom = 1; tblL.style.zoom = 1; isiL.style.maxWidth = 'none'; isiL.style.marginLeft = isiL.style.marginRight = '0';
+      isiL.style.zoom = 1; tblL.style.zoom = 1; for (var el = isiL; el && el !== document.body; el = el.parentElement) { el.style.maxWidth = 'none'; el.style.marginLeft = el.style.marginRight = '0'; }
       var hA = (document.querySelector('.atas') || { offsetHeight: 64 }).offsetHeight, hB = (document.querySelector('.lembar') || { offsetHeight: 56 }).offsetHeight;
       var muatTinggi = (window.innerHeight - hA - hB - 12) / (isiL.scrollHeight + 8), muatLebar = tabelL.clientWidth / tblL.scrollWidth;
       isiL.style.zoom = Math.max(0.5, Math.min(1, muatTinggi, muatLebar));
@@ -698,7 +702,7 @@ if (f) {
     var tb = pilih(); if (!tb) return;
     var wd = tb.parentElement, isi = wd.parentElement;
     tb.classList.add('lap2'); wd.style.maxHeight = 'none'; wd.style.overflowX = 'hidden';
-    isi.style.zoom = 1; tb.style.zoom = 1; isi.style.maxWidth = 'none'; isi.style.marginLeft = isi.style.marginRight = '0';
+    isi.style.zoom = 1; tb.style.zoom = 1; for (var el = isi; el && el !== document.body; el = el.parentElement) { el.style.maxWidth = 'none'; el.style.marginLeft = el.style.marginRight = '0'; }
     var hA = (document.querySelector('.atas') || { offsetHeight: 64 }).offsetHeight, hB = (document.querySelector('.lembar') || { offsetHeight: 56 }).offsetHeight;
     var tinggi = tb.getBoundingClientRect().bottom - isi.getBoundingClientRect().top + 8;
     isi.style.zoom = Math.max(0.5, Math.min(1, (window.innerHeight - hA - hB - 12) / tinggi, wd.clientWidth / tb.scrollWidth));
