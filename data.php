@@ -181,6 +181,7 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
 .sd{display:inline-block;margin-left:8px;padding:2px 10px;border-radius:999px;background:color-mix(in srgb,var(--w) 10%,#fff);color:#334155}
 /* [muat-layar] */
 *:has(> table.lap){max-height:none!important;overflow-x:hidden!important}
+table.lap tr.baris-kosong{display:none}
 table.lap th{white-space:normal!important;max-width:118px;line-height:1.25;vertical-align:bottom}
 table.lap td{padding-left:9px!important;padding-right:9px!important}
 .mode-report .atas,.mode-report .lembar,.mode-report #bReport,.mode-report #bSalin{display:none!important}
@@ -250,7 +251,10 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
         isiL.style.zoom = Math.max(0.4, r); return;
       }
       isiL.style.zoom = 1; tblL.style.zoom = 1;
-      var w = tabelL.clientWidth / tblL.scrollWidth; tblL.style.zoom = w < 1 ? Math.max(0.55, w) : 1;
+      var hA = (document.querySelector('.atas') || { offsetHeight: 64 }).offsetHeight, hB = (document.querySelector('.lembar') || { offsetHeight: 56 }).offsetHeight;
+      var muatTinggi = (window.innerHeight - hA - hB - 12) / (isiL.scrollHeight + 8), muatLebar = tabelL.clientWidth / tblL.scrollWidth;
+      isiL.style.zoom = Math.max(0.55, Math.min(1, muatTinggi, muatLebar));
+      if (isiL.getBoundingClientRect().top < hA) window.scrollTo(0, 0);
     }
     window.addEventListener('resize', pas); window.addEventListener('load', pas); setTimeout(pas, 60); setTimeout(pas, 500);
     function keluarReport() { document.body.classList.remove('mode-report'); pas(); }
