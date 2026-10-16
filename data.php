@@ -181,13 +181,14 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
 .sd{display:inline-block;margin-left:8px;padding:2px 10px;border-radius:999px;background:color-mix(in srgb,var(--w) 10%,#fff);color:#334155}
 /* [muat-layar] */
 *:has(> table.lap){max-height:none!important;overflow-x:hidden!important}
-table.lap tr.baris-kosong{display:none}
 table.lap th{white-space:normal!important;max-width:118px;line-height:1.25;vertical-align:bottom}
 table.lap td{padding-left:9px!important;padding-right:9px!important}
 .mode-report .atas,.mode-report .lembar,.mode-report #bReport,.mode-report #bSalin{display:none!important}
 .mode-report{background:#fff!important}.mode-report .isi{max-width:none!important;margin:0!important;padding:14px 18px!important;animation:none!important}
 .mode-report .tabel{overflow:visible!important;max-height:none!important}.mode-report tr.baris-kosong{display:none}
 /* [pas-semua] */
+table.lap td,table.lap2 td{padding-top:4px!important;padding-bottom:4px!important}
+table.lap2 input,table.lap2 .sel{padding-top:3px!important;padding-bottom:3px!important;min-height:0!important}
 table.lap2 th{white-space:normal!important;max-width:118px;line-height:1.25;vertical-align:bottom}
 /* [segar] tampilan modern */
 body{font-family:'Inter',-apple-system,Segoe UI,Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;
@@ -255,7 +256,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
       isiL.style.zoom = 1; tblL.style.zoom = 1;
       var hA = (document.querySelector('.atas') || { offsetHeight: 64 }).offsetHeight, hB = (document.querySelector('.lembar') || { offsetHeight: 56 }).offsetHeight;
       var muatTinggi = (window.innerHeight - hA - hB - 12) / (isiL.scrollHeight + 8), muatLebar = tabelL.clientWidth / tblL.scrollWidth;
-      isiL.style.zoom = Math.max(0.55, Math.min(1, muatTinggi, muatLebar));
+      isiL.style.zoom = Math.max(0.5, Math.min(1, muatTinggi, muatLebar));
       if (isiL.getBoundingClientRect().top < hA) window.scrollTo(0, 0);
     }
     window.addEventListener('resize', pas); window.addEventListener('load', pas); setTimeout(pas, 60); setTimeout(pas, 500);
@@ -697,15 +698,10 @@ if (f) {
     var tb = pilih(); if (!tb) return;
     var wd = tb.parentElement, isi = wd.parentElement;
     tb.classList.add('lap2'); wd.style.maxHeight = 'none'; wd.style.overflowX = 'hidden';
-    Array.prototype.forEach.call(tb.querySelectorAll('tbody tr'), function (tr) {
-      var ins = tr.querySelectorAll('input');
-      var depan = (tr.dataset.t && tr.dataset.t > hariIni) || (ins.length && Array.prototype.every.call(ins, function (x) { return x.disabled; }));
-      if (depan) tr.style.display = 'none';
-    });
     isi.style.zoom = 1; tb.style.zoom = 1;
     var hA = (document.querySelector('.atas') || { offsetHeight: 64 }).offsetHeight, hB = (document.querySelector('.lembar') || { offsetHeight: 56 }).offsetHeight;
     var tinggi = tb.getBoundingClientRect().bottom - isi.getBoundingClientRect().top + 8;
-    isi.style.zoom = Math.max(0.55, Math.min(1, (window.innerHeight - hA - hB - 12) / tinggi, wd.clientWidth / tb.scrollWidth));
+    isi.style.zoom = Math.max(0.5, Math.min(1, (window.innerHeight - hA - hB - 12) / tinggi, wd.clientWidth / tb.scrollWidth));
   }
   window.addEventListener('load', pas); window.addEventListener('resize', pas); setTimeout(pas, 300);
 })();
