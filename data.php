@@ -180,6 +180,7 @@ a.akun{color:var(--teks);text-decoration:none;border-bottom:1px dashed #cbd5e1}.
 .lenc-w{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;background:#fef3c7;color:#b45309;font-size:10.5px;font-weight:600;vertical-align:1px}
 .sd{display:inline-block;margin-left:8px;padding:2px 10px;border-radius:999px;background:color-mix(in srgb,var(--w) 10%,#fff);color:#334155}
 /* [muat-layar] */
+.tabel:has(table.lap){max-height:none!important;overflow-x:hidden!important}
 table.lap th{white-space:normal!important;max-width:118px;line-height:1.25;vertical-align:bottom}
 table.lap td{padding-left:9px!important;padding-right:9px!important}
 .mode-report .atas,.mode-report .lembar,.mode-report #bReport,.mode-report #bSalin{display:none!important}
@@ -229,7 +230,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
       . '*Total ' . $NB[$bl] . ' ' . $th . "*\n" . 'Omset Shopee: ' . rp($TOT['so']) . "\n" . 'Pesanan: ' . an($TOT['sp']) . "\n"
       . 'Daily Cost All: ' . rp($TOT['ca']) . "\n" . 'Daily Roas All / ROMI: ' . rs($avgA); ?>
   <div class="alat"><div class="ket" style="margin:0">Laporan lengkap terakhir: <b><?= e($label($a['t'])) ?></b> · dibanding hari sebelumnya <span class="sd">Shopee terisi s/d <b><?= e($sdS) ?></b> · CPAS Meta s/d <b><?= e($sdM) ?></b></span></div>
-    <div class="alat-kanan"><button class="btn abu" id="bReport" type="button">⛶ Mode report</button><button class="btn abu" id="bSalin" type="button">📋 Salin ringkasan</button></div></div>
+    <div class="alat-kanan"><button class="btn abu" id="bSalin" type="button">📋 Salin ringkasan</button></div></div>
   <script>
   (function () {
     var RK = <?= json_encode($rk, JSON_UNESCAPED_UNICODE) ?>, NAMA = <?= json_encode('Laporan ' . ucfirst($merk) . ' ' . $NB[$bl] . ' ' . $th) ?>;
@@ -248,7 +249,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
     }
     window.addEventListener('resize', pas); setTimeout(pas, 60);
     function keluarReport() { document.body.classList.remove('mode-report'); pas(); }
-    document.getElementById('bReport').onclick = function () {
+    var bR = document.getElementById('bReport'); if (bR) bR.onclick = function () {
       document.body.classList.add('mode-report'); window.scrollTo(0, 0);
       var fs = document.documentElement.requestFullscreen ? document.documentElement.requestFullscreen() : null;
       (fs || Promise.resolve()).catch(function () {}).then(function () { setTimeout(pas, 200); });
