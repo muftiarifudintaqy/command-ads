@@ -121,6 +121,7 @@ $public = [
     'spendSource' => $C['spend_source'],
     'funnels' => $C['funnels'],
     'products' => $C['products'] ?? [],
+    'productSets' => $C['product_sets'] ?? [],   // product set CPAS → produk (langkah 3 kolom Produk export)
     'accounts' => array_map(fn($a) => ['name' => $a['name'], 'id' => $a['id'], 'group' => $a['group'], 'token' => $a['token'], 'product' => $a['product'] ?? ''], $C['accounts']),
     'ai' => ['provider' => $C['ai']['provider']],
     'loginEnabled' => $loginOn,

@@ -39,17 +39,25 @@ return [
         ['label' => 'SHOPEE', 'match' => ['shopee']],
     ],
 
-    // PRODUK iklan — dideteksi otomatis dari link Shopee iklan, lalu dari kode di nama campaign/ad set/iklan.
-    // 'match' = kata kunci (huruf besar/kecil bebas, harus kata utuh). Tambah/ubah sesukanya.
+    // PRODUK untuk kolom "Produk" (dashboard & export Naming/Fix). SATU-SATUNYA tempat mapping kata kunci → produk.
+    //   label   = nama di dashboard/export (urutan = urutan prioritas & urutan kelompok di sheet Fix)
+    //   brand   = Prepare / Skinlyfe (brand akun: dari token akun, mis. akun Selow & Glowing Cantik = Prepare)
+    //   match   = kode/kata di nama campaign, ad set, iklan (langkah 1–2)
+    //   caption = kata kunci tambahan di naming & caption iklan (langkah 4, HANYA kalau brand akun = brand produk)
+    //   product_sets = ID product set CPAS (promoted_object ad set) → produk (langkah 3; nama product set tidak bisa dibaca API)
     'products' => [
-        ['label' => 'LS',          'match' => ['ls', 'lipseed', 'lip seed', 'lip serum', 'lipserum', 'lip oil']],
-        ['label' => 'Leafit',      'match' => ['lf', 'leafit']],
-        ['label' => 'NS',          'match' => ['ns']],
-        ['label' => 'UA',          'match' => ['ua']],
-        ['label' => 'Eyecream',    'match' => ['eyecream', 'eye cream']],
-        ['label' => 'Footspray',   'match' => ['footspray', 'foot spray']],
-        ['label' => 'Mouth Spray', 'match' => ['mouth spray', 'mouthspray', 'ms']],
+        ['label' => 'LS',               'brand' => 'Prepare',  'match' => ['ls', 'lipseed', 'lip seed', 'lip serum', 'lipserum', 'lip oil'], 'caption' => ['dark lips', 'bibir']],
+        ['label' => 'Leafit',           'brand' => 'Prepare',  'match' => ['lf', 'leafit'], 'caption' => ['diet', 'teh']],
+        ['label' => 'NS',               'brand' => 'Prepare',  'match' => ['ns', 'nail serum'], 'caption' => ['kuku']],
+        ['label' => 'Eyecream',         'brand' => 'Prepare',  'match' => ['eyecream', 'eye cream'], 'caption' => ['mata']],
+        ['label' => 'Footspray',        'brand' => 'Prepare',  'match' => ['footspray', 'foot spray', 'fs', 'footdeo', 'footdeodorant', 'foot deodorant', 'deodorant', 'foot care', 'bau kaki'], 'caption' => ['kaki']],
+        ['label' => 'Tone Up',          'brand' => 'Prepare',  'match' => ['tp', 'tone up', 'toneup'], 'caption' => []],
+        ['label' => 'UA',               'brand' => 'Skinlyfe', 'match' => ['ua'], 'caption' => []],
+        ['label' => 'Mouth Spray',      'brand' => 'Skinlyfe', 'match' => ['mouth spray', 'mouthspray', 'ms', '1ms'], 'caption' => []],
+        // BC = Body Cream = Cream Bekas Luka (satu produk Skinlyfe)
+        ['label' => 'Body Cream',       'brand' => 'Skinlyfe', 'match' => ['bc', 'body cream', 'bodycream', 'bekas luka'], 'caption' => ['body cream', 'bekas luka']],
     ],
+    'product_sets' => [],
 
     'tokens' => [
         'prepare'  => getenv('META_TOKEN_PREPARE') ?: '',

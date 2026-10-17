@@ -67,7 +67,8 @@ const PRODUCTS = (CFG.products && CFG.products.length ? CFG.products : [
   { label: "Eyecream", match: ["eyecream", "eye cream"] },
   { label: "Footspray", match: ["footspray", "foot spray", "fs", "footdeo", "footdeodorant", "foot deodorant", "deodorant", "foot care", "bau kaki"] },
   { label: "Mouth Spray", match: ["mouth spray", "mouthspray", "ms"] }
-]).map(p => ({ label: p.label, keys: (p.match || []).map(k => " " + String(k).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ") }));
+]).map(p => ({ label: p.label, brand: p.brand || "", keys: (p.match || []).map(k => " " + String(k).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " "),
+  cap: (p.caption || []).map(k => " " + String(k).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ") }));
 function productOfText(t) {
   if (!t) return "";
   const x = " " + String(t).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ";
@@ -84,6 +85,44 @@ function productOf(ad) {   // produk 1 iklan
 }
 const productsOfEnt = e => [...new Set((e.level === "ad" ? [e] : adsIn(e)).map(productOf).filter(Boolean))];
 const prodLabel = e => productsOfEnt(e).join(", ");
+
+// PRODUK per NAMING (sheet Naming & Fix): WAJIB tepat 1 produk, tidak kosong, tidak gabungan.
+//   1. campaign dengan spend terbesar di naming itu yang namanya berisi kode produk
+//   2. ad set, lalu nama iklan (spend terbesar dulu)
+//   3. product set CPAS ad set → config.php 'product_sets' (nama product set tidak bisa dibaca API)
+//   4. kata kunci di naming lalu caption iklan — HANYA produk se-brand akun (config.php 'products' → 'caption')
+//   5. produk spend terbesar di akun itu (dari hasil langkah 1–4 semua naming akun), lalu se-brand
+const PSETS = CFG.productSets || {};
+const sameBrand = (p, brand) => !p.brand || !brand || p.brand.toLowerCase() === String(brand).toLowerCase();
+function productOfCaption(t, brand) {
+  if (!t) return "";
+  const x = " " + String(t).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ";
+  for (const p of PRODUCTS) if (sameBrand(p, brand) && [...p.keys, ...p.cap].some(k => k.trim() && x.includes(k))) return p.label;
+  return "";
+}
+const adSpend = a => AM.get(a.id)?.spend || 0;
+function productOfNaming(list, label, tops) {   // tops = null → hanya langkah 1–4 (dipakai productTops)
+  const rank = key => { const m = new Map(); list.forEach(a => { const o = key(a); if (!o) return; const e = m.get(o.id) || { o, s: 0 }; e.s += adSpend(a); m.set(o.id, e); }); return [...m.values()].sort((x, y) => y.s - x.s).map(e => e.o); };
+  let p;
+  for (const c of rank(a => a.camp)) if ((p = productOfText(c.name))) return p;
+  for (const s of rank(a => a.adset)) if ((p = productOfText(s.name))) return p;
+  for (const a of rank(a => a)) if ((p = productOfText(a.name))) return p;
+  for (const s of rank(a => a.adset)) if ((p = PSETS[s.ps])) return p;
+  const brand = rank(a => a.acc)[0]?.brand || "";
+  if ((p = productOfCaption(label, brand))) return p;
+  for (const a of rank(a => a)) if ((p = productOfCaption(a.desc, a.acc.brand))) return p;
+  if (!tops) return "";
+  for (const acc of rank(a => a.acc)) if ((p = tops.acc.get(acc.id))) return p;
+  return tops.brand.get(brand.toLowerCase()) || tops.any || "";
+}
+function productTops(groups) {   // produk spend terbesar per akun / per brand / semua — dari langkah 1–4 tiap naming per akun
+  const add = (m, k, p, s) => { const x = m.get(k) || new Map(); x.set(p, (x.get(p) || 0) + s); m.set(k, x); };
+  const acc = new Map(), br = new Map(), all = new Map();
+  groups.forEach(g => { const p = productOfNaming(g.list, g.label, null); if (!p) return;
+    g.list.forEach(a => { const s = adSpend(a); add(acc, a.acc.id, p, s); add(br, String(a.acc.brand).toLowerCase(), p, s); add(all, "*", p, s); }); });
+  const top = m => new Map([...m].map(([k, x]) => [k, [...x].sort((a, b) => b[1] - a[1])[0][0]]));
+  return { acc: top(acc), brand: top(br), any: top(all).get("*") || "" };
+}
 function rebuild() {
   PRODC.clear();
   CAMPAIGNS = ACCOUNTS.flatMap(a => a.campaigns.filter(c => c.ads.length));
@@ -160,7 +199,7 @@ const AD_FIELDS_FULL = AD_FIELDS_BASIC + ",creative{body,title,thumbnail_url,lin
 const structReqs = acc => [
   { path: acc.act, params: { fields: "name,currency" } },
   { path: `${acc.act}/campaigns`, params: { fields: "id,name,status,effective_status,daily_budget,lifetime_budget,start_time", effective_status: ["ACTIVE", "IN_PROCESS", "WITH_ISSUES"], limit: 500 } },
-  { path: `${acc.act}/adsets`, params: { fields: "id,name,campaign_id,status,daily_budget,lifetime_budget,start_time", effective_status: ["ACTIVE", "IN_PROCESS", "WITH_ISSUES"], limit: 500 } },
+  { path: `${acc.act}/adsets`, params: { fields: "id,name,campaign_id,status,daily_budget,lifetime_budget,start_time,promoted_object", effective_status: ["ACTIVE", "IN_PROCESS", "WITH_ISSUES"], limit: 500 } },
   { path: `${acc.act}/ads`, params: { fields: AD_FIELDS_MID, effective_status: LIVE_AD_ST, limit: 200 } }   // tanpa link creative: field itu berat & bikin akun besar gagal/lemot (produk cukup dari nama campaign)
 ];
 function applyStructure(acc, [info, camps, sets, ads]) {
@@ -197,7 +236,8 @@ function buildStructure(acc) {
   const mkSet = (id, name, campId, campName) => {
     if (sMap.has(id)) { const st = sMap.get(id); if (st.name === id && name) st.name = name; if (campName) mkCamp(st.camp.id, campName); return st; }
     const o = setObj.get(id), camp = mkCamp(o?.campaign_id || campId, campName), [b, bt] = bud(o);
-    const s = { id, level: "adset", acc, camp, name: o?.name || name || id, budget: b, budgetType: bt, start: (o?.start_time || "").slice(0, 10) || camp.start, on: o?.status === "ACTIVE", ads: [] };
+    const s = { id, level: "adset", acc, camp, name: o?.name || name || id, budget: b, budgetType: bt, start: (o?.start_time || "").slice(0, 10) || camp.start, on: o?.status === "ACTIVE", ads: [],
+      ps: o?.promoted_object?.product_set_id || "" };   // product set CPAS (langkah 3 kolom Produk)
     camp.adsets.push(s); sMap.set(id, s); return s;
   };
   const mkAd = (id, name, setId, setName, campId, campName) => {
@@ -1280,18 +1320,24 @@ function winAds(ents) {
   ents.forEach(e => (e.level === "ad" ? [e] : adsIn(e)).forEach(a => { if (!seen.has(a.id) && scopeOk(a) && qOk(a)) { seen.add(a.id); ads.push(a); } }));
   return ads;
 }
+function namingGroups(ads, perAcc) {   // naming → iklan-iklannya. perAcc: per akun (sheet Naming) / gabungan semua akun (sheet Fix)
+  const g = new Map();
+  ads.forEach(a => {
+    const label = namingOfEnt(a), k = (perAcc ? a.acc.id + "|" : "") + label.toLowerCase().replace(/[\s_.]+/g, "");
+    if (!g.has(k)) g.set(k, { label, acc: a.acc, list: [] }); g.get(k).list.push(a);
+  });
+  return [...g.values()];
+}
+const produkInvalid = rows => rows.filter(p => !p || String(p).includes(",")).length;   // validasi kolom Produk: 0 kosong, 0 gabungan
 function namingFix(ents) {
   // sheet "Fix": TANPA akun — naming yang sama dari semua akun dijumlah jadi 1 baris, dikelompokkan per produk
-  const ads = winAds(ents), g = new Map();
-  ads.forEach(a => {
-    const label = namingOfEnt(a), k = label.toLowerCase().replace(/[\s_.]+/g, "");
-    if (!g.has(k)) g.set(k, { label, list: [] }); g.get(k).list.push(a);
-  });
+  const ads = winAds(ents);
+  const tops = productTops(namingGroups(ads, true));
   const pOrder = p => { const i = PRODUCTS.findIndex(x => x.label === p); return i < 0 ? 999 : i; };
-  const groups = [...g.values()].map(x => {
-    const prods = [...new Set(x.list.map(productOf).filter(Boolean))];
+  const groups = namingGroups(ads, false).map(x => {
+    const prod = productOfNaming(x.list, x.label, tops);
     const run = x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0);
-    return { ...x, prods, prod: prods[0] || "", m: sumM(x.list.map(a => AM.get(a.id))), run,
+    return { ...x, prod, m: sumM(x.list.map(a => AM.get(a.id))), run,
       camps: [...new Set(run.map(a => a.camp))], accs: [...new Set(x.list.map(a => a.acc.id))] };
   }).filter(x => x.m.purch > 0)
     .sort((a, b) => pOrder(a.prod) - pOrder(b.prod) || winScore(b.m) - winScore(a.m));
@@ -1300,21 +1346,18 @@ function namingFix(ents) {
     title: `Gabungan semua akun per naming · semua iklan dijumlah (sama dengan Ads Manager) · hanya naming yang ada purchase · ${groups.length} konten · naming sama dari akun berbeda dijumlah jadi 1 · dikelompokkan per produk`,
     head: ["Peringkat", "Naming", "Produk", "Jumlah akun", "Iklan yang jalan (ada spend)", "Campaign yang jalan", ...MCOLS.map(c => c.t)],
     kinds: ["int", "txt", "txt", "int", "int", "int", ...MCOLS.map(c => MKIND[c.k])],
-    rows: groups.map(x => [rk.set(x.prod, (rk.get(x.prod) || 0) + 1).get(x.prod), x.label, x.prods.join(", "), x.accs.length, x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m))]),
+    rows: groups.map(x => [rk.set(x.prod, (rk.get(x.prod) || 0) + 1).get(x.prod), x.label, x.prod, x.accs.length, x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m))]),
     total: ["", "TOTAL", "", "", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m))))],
     dup: groups.map(x => x.accs.length > 1), dupCol: 1,
-    raws: groups.map(x => x.m), sumCols: [4, 5], countCol: 1, countWord: "naming"
+    raws: groups.map(x => x.m), sumCols: [4, 5], countCol: 1, countWord: "naming",
+    produkInvalid: produkInvalid(groups.map(x => x.prod))
   };
 }
 function namingSummary(ents) {
   // dihitung SELALU dari level iklan (nama konten) — export dari Campaigns, Ad sets, atau Ads menghasilkan sheet Naming yang SAMA
   const ads = winAds(ents);
-  const g = new Map();
-  ads.forEach(a => {
-    const label = namingOfEnt(a), k = a.acc.id + "|" + label.toLowerCase().replace(/[\s_.]+/g, "");
-    if (!g.has(k)) g.set(k, { label, acc: a.acc, list: [] }); g.get(k).list.push(a);
-  });
-  const groups = [...g.values()].map(x => ({ ...x, m: sumM(x.list.map(a => AM.get(a.id))),
+  const all = namingGroups(ads, true), tops = productTops(all);
+  const groups = all.map(x => ({ ...x, prod: productOfNaming(x.list, x.label, tops), m: sumM(x.list.map(a => AM.get(a.id))),
       run: x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0),
       camps: [...new Set(x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0).map(a => a.camp))], accs: [...new Set(x.list.map(a => a.acc.name))] }))
     .filter(x => x.m.purch > 0)   // naming tanpa purchase = tidak winning → tidak masuk
@@ -1324,10 +1367,11 @@ function namingSummary(ents) {
     title: `Summary per naming (nama konten iklan) · semua iklan dijumlah (sama dengan Ads Manager) · hanya naming yang ada purchase · ${groups.length} konten · B2/B3/SQ/Shopee/VATC/Copy digabung · sama untuk export Campaigns/Ad sets/Ads`,
     head: ["Peringkat", "Akun", "Naming", "Produk", "Iklan yang jalan (ada spend)", "Campaign yang jalan", ...MCOLS.map(c => c.t), "Campaign"],
     kinds: ["int", "txt", "txt", "txt", "int", "int", ...MCOLS.map(c => MKIND[c.k]), "txt"],
-    rows: groups.map(x => [rk.set(x.acc.id, (rk.get(x.acc.id) || 0) + 1).get(x.acc.id), x.acc.name, x.label, [...new Set(x.list.map(productOf).filter(Boolean))].join(", "), x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m)), [...new Set(x.list.map(a => a.camp))].map(c => c.name).join("  |  ")]),
+    rows: groups.map(x => [rk.set(x.acc.id, (rk.get(x.acc.id) || 0) + 1).get(x.acc.id), x.acc.name, x.label, x.prod, x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m)), [...new Set(x.list.map(a => a.camp))].map(c => c.name).join("  |  ")]),
     total: ["", "TOTAL", `${groups.length} naming`, "", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
     dup: groups.map(x => x.list.length > 1), dupCol: 2,
-    raws: groups.map(x => x.m), sumCols: [4, 5], countCol: 2, countWord: "naming"
+    raws: groups.map(x => x.m), sumCols: [4, 5], countCol: 2, countWord: "naming",
+    produkInvalid: produkInvalid(groups.map(x => x.prod))
   };
 }
 function exportData() {
@@ -1355,6 +1399,9 @@ function exportData() {
     return accIdx(a.acc) - accIdx(b.acc) || ra - rb || winScore(mOf(b)) - winScore(mOf(a));
   });
   const verdict = e => { const c = clGet(e.id)?.data; return { v: c && V[c.verdict] ? c.verdict : AI.get(e.id).v, why: c?.summary || AI.get(e.id).r[0] }; };
+  const summary = namingSummary(ents), fix = namingFix(ents);
+  if (summary.produkInvalid || fix.produkInvalid)   // seharusnya selalu 0 (lihat productOfNaming); kalau tidak, jangan diam-diam
+    alert(`Peringatan: kolom Produk tidak valid (kosong/gabungan) — sheet Naming ${summary.produkInvalid}, sheet Fix ${fix.produkInvalid}. Tambahkan kata kunci produk di config.php → 'products'.`);
   return {
     title: `${viewName} · ${LVL[S.level][2]}s · ${rangeText()}`,
     head: ["Peringkat", "Akun", LVL[S.level][2] === "Ad" ? "Iklan" : LVL[S.level][2], "Naming", "Produk", "Delivery", "Rekomendasi", "Budget harian", ...mh, "Alasan rekomendasi", "Campaign", "ID"],
@@ -1362,8 +1409,8 @@ function exportData() {
     rows: (rk => ents.map(e => { const vd = verdict(e); rk.set(e.acc.id, (rk.get(e.acc.id) || 0) + 1); return [rk.get(e.acc.id), e.acc.name, e.name, namingOfEnt(e), prodLabel(e), delivery(e).t, V[vd.v].label, e.budget ? Math.round(e.budget) : null, ...mv(mOf(e)), vd.why, e.level === "campaign" ? "" : e.camp.name, e.id]; }))(new Map()),
     raws: ents.map(mOf), sumCols: [7], countCol: 2, countWord: LVL[S.level][1],
     total: ["", "TOTAL", `${ents.length} ${LVL[S.level][1]}`, "", "", "", "", ents.reduce((t, e) => t + (e.budget || 0), 0) || null, ...mv(sumM(ents.map(mOf))), "", "", ""],
-    summary: namingSummary(ents),
-    fix: namingFix(ents)
+    summary,
+    fix
   };
 }
 function exportFor(accId) {   // hitung ulang khusus 1 akun (atau semua), lalu kembalikan tampilan seperti semula
