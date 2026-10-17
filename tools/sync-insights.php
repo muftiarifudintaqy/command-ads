@@ -12,7 +12,8 @@
 
    Aturan tarik:
      - paralel maks 4 akun (proses anak), 1 akun berurutan
-     - 3 level sama dengan app.js insightReqs: ad, campaign (ACTIVE+PAUSED), account; filter spend > 0 di ad & campaign
+     - 3 level sama dengan app.js insightReqs: ad, campaign (ACTIVE+PAUSED), account; TANPA filter spend
+       (konversi di hari tanpa belanja tetap ikut, sama dengan Ads Manager)
      - rentang > 7 hari: async insights job (POST → poll report_run_id → ambil hasil)
      - "Please reduce the amount of data" / code 1 / job gagal: TIDAK diulang ukuran sama → rentang dipecah 2 s.d. per hari
      - code 2 (temporary): retry backoff; 4/17/32/613/80000-80014 (rate limit): tunggu sesuai header x-business-use-case-usage
@@ -122,14 +123,16 @@ function days_between(string $a, string $b): array { $o = []; for ($d = $a; $d <
 function level_params(string $level): array {
     global $ATTR;
     $conv = 'actions,catalog_segment_actions,catalog_segment_value,video_thruplay_watched_actions';
-    $spend = ['field' => 'spend', 'operator' => 'GREATER_THAN', 'value' => 0];
+    // TANPA filter spend > 0: Meta melaporkan konversi juga di hari ketika iklan tidak berbelanja
+    // (atribusi 7d_click). Filter spend > 0 per hari membuat purchase/value per iklan/campaign
+    // lebih rendah s/d 1,5% dari Ads Manager (audit 17 Okt 2026). Meta sendiri tidak mengirim baris kosong.
     $p = ['level' => $level, 'time_increment' => 1, 'action_attribution_windows' => $ATTR];
     if ($level === 'ad') {
         $p['fields'] = "ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,inline_link_clicks,frequency,$conv";
-        $p['filtering'] = [['field' => 'ad.effective_status', 'operator' => 'IN', 'value' => ['ACTIVE', 'PAUSED', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED', 'ARCHIVED', 'PENDING_REVIEW', 'DISAPPROVED', 'PREAPPROVED', 'PENDING_BILLING_INFO', 'IN_PROCESS', 'WITH_ISSUES']], $spend];
+        $p['filtering'] = [['field' => 'ad.effective_status', 'operator' => 'IN', 'value' => ['ACTIVE', 'PAUSED', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED', 'ARCHIVED', 'PENDING_REVIEW', 'DISAPPROVED', 'PREAPPROVED', 'PENDING_BILLING_INFO', 'IN_PROCESS', 'WITH_ISSUES']]];
     } elseif ($level === 'campaign') {
         $p['fields'] = "campaign_id,spend,impressions,inline_link_clicks,$conv";
-        $p['filtering'] = [['field' => 'campaign.effective_status', 'operator' => 'IN', 'value' => ['ACTIVE', 'PAUSED']], $spend];
+        $p['filtering'] = [['field' => 'campaign.effective_status', 'operator' => 'IN', 'value' => ['ACTIVE', 'PAUSED']]];
     } else {
         $p['fields'] = "spend,impressions,inline_link_clicks,$conv";
     }
@@ -241,11 +244,13 @@ function sync_account(array $C, array $acc, string $since, string $until, string
         $campI = fetch_level($act, 'campaign', $since, $until, $tok, $cara);
         $accI = fetch_level($act, 'account', $since, $until, $tok, $cara);
 
-        $adRows = []; foreach ($adI as $r) $adRows[] = ['act_id' => $id, 'tanggal' => $r['date_start'], 'ad_id' => $r['ad_id'],
+        // tanpa filter spend, Meta juga mengirim baris harian yang SEMUA metriknya 0 (iklan sudah berhenti) → dilewati
+        $kosong = fn(array $m) => !array_filter($m, fn($v) => (float) $v != 0);
+        $adRows = []; foreach ($adI as $r) { if ($kosong(metrics($r))) continue; $adRows[] = ['act_id' => $id, 'tanggal' => $r['date_start'], 'ad_id' => $r['ad_id'],
             'ad_name' => mb_substr((string) ($r['ad_name'] ?? ''), 0, 500), 'adset_id' => (string) ($r['adset_id'] ?? ''), 'adset_name' => mb_substr((string) ($r['adset_name'] ?? ''), 0, 500),
             'campaign_id' => (string) ($r['campaign_id'] ?? ''), 'campaign_name' => mb_substr((string) ($r['campaign_name'] ?? ''), 0, 500)]
-            + metrics($r) + ['freq' => (float) ($r['frequency'] ?? 0)];
-        $campRows = []; foreach ($campI as $r) $campRows[] = ['act_id' => $id, 'tanggal' => $r['date_start'], 'campaign_id' => $r['campaign_id']] + metrics($r);
+            + metrics($r) + ['freq' => (float) ($r['frequency'] ?? 0)]; }
+        $campRows = []; foreach ($campI as $r) { if ($kosong(metrics($r))) continue; $campRows[] = ['act_id' => $id, 'tanggal' => $r['date_start'], 'campaign_id' => $r['campaign_id']] + metrics($r); }
         $accRows = []; foreach ($accI as $r) $accRows[] = ['act_id' => $id, 'tanggal' => $r['date_start']] + metrics($r);
 
         $db->beginTransaction();
