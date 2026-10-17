@@ -241,13 +241,14 @@ async function loadInsights(acc) {
 function applyInsights(acc, [adI, campI, accI]) {
   acc.ads.forEach(a => { a.days = {}; a.freqR = null; });
   acc.campaigns.forEach(c => c.days = {});
-  adI.forEach(r => { const ad = acc.maps.mkAd(r.ad_id, r.ad_name, r.adset_id, r.adset_name, r.campaign_id, r.campaign_name); const x = rowArr(r); x[6] = +r.frequency || 0; ad.days[r.date_start] = x; });
-  campI.forEach(r => { const c = acc.maps.cMap.get(r.campaign_id); if (c) c.days[r.date_start] = rowArr(r); });
+  // r.x = angka siap pakai dari tabel lokal (localRows); tanpa r.x = baris mentah Meta
+  adI.forEach(r => { const ad = acc.maps.mkAd(r.ad_id, r.ad_name, r.adset_id, r.adset_name, r.campaign_id, r.campaign_name); const x = r.x || rowArr(r); if (!r.x) x[6] = +r.frequency || 0; ad.days[r.date_start] = x; });
+  campI.forEach(r => { const c = acc.maps.cMap.get(r.campaign_id); if (c) c.days[r.date_start] = r.x || rowArr(r); });
   // total akun: konversi SELALU level akun (dedup Meta). Spend: sesuai spendSource di config.js
   //   "account"  = spend level akun (semua campaign, termasuk yang sudah dihapus) → sama dengan script sheet Prepare
   //   "campaign" = jumlah campaign ACTIVE+PAUSED                                → sama dengan script sheet Skinlyfe
   acc.daysAll = {}; acc.daysCamp = {}; acc.days = {};
-  accI.forEach(r => { acc.daysAll[r.date_start] = rowArr(r); });
+  accI.forEach(r => { acc.daysAll[r.date_start] = r.x || rowArr(r); });
   campI.forEach(r => { const d = acc.daysCamp[r.date_start] ||= [0, 0, 0, 0, 0, 0]; d[0] += +r.spend || 0; d[1] += +r.impressions || 0; d[2] += +r.inline_link_clicks || 0; });
   const src = acc.spendSrc === "campaign" ? acc.daysCamp : acc.daysAll;
   new Set([...Object.keys(acc.daysAll), ...Object.keys(acc.daysCamp)]).forEach(d => {
@@ -299,29 +300,59 @@ async function gmulti(reqs) {   // server (api.php) menjalankan semua request ke
   return j.results;
 }
 const unwrap = x => x.data ?? x.obj;
-async function loadAll(withStructure) {
+// ---------- DATA LOKAL: tabel montera_ads.ins_* diisi cron /opt/montera-ads/sync-insights.php (hari ini tiap 10 mnt, 3 hari tiap 30 mnt) ----------
+function localRows(L, x) {   // baris ringkas api.php?action=local → bentuk applyInsights (x = urutan rowArr, siap pakai)
+  const N = L.names;
+  return [
+    x.ad.map(r => ({ date_start: r[0], ad_id: r[1], adset_id: r[2], campaign_id: r[3], ad_name: N[r[4]], adset_name: N[r[5]], campaign_name: N[r[6]], x: r.slice(7, 17) })),
+    x.camp.map(r => ({ date_start: r[0], campaign_id: r[1], spend: r[2], impressions: r[3], inline_link_clicks: r[4], x: [r[2], r[3], r[4], r[5], r[6], r[7], 0, r[8], r[9], r[10]] })),
+    x.acc.map(r => ({ date_start: r[0], spend: r[1], impressions: r[2], inline_link_clicks: r[3], x: [r[1], r[2], r[3], r[4], r[5], r[6], 0, r[7], r[8], r[9]] }))
+  ];
+}
+const parseDT = s => s ? new Date(s.replace(" ", "T")) : null;
+const TOKEN_MSG = { invalid: "Token invalid (code 190) — ganti token di /etc/montera-ads-meta.json", no_access: "Token tidak punya akses ke akun ini — assign System User di Business Manager" };
+async function loadLocal() {   // akun yang SEMUA tanggalnya sudah tersimpan → langsung dari tabel lokal
+  const done = new Set();
+  const L = await api("local", { from: S.from, to: S.to });
+  ACCOUNTS.forEach(a => {
+    const x = L.accounts?.[a.id]; if (!x) return;
+    a.localStatus = x.status; a.localAt = parseDT(x.updated);
+    if (!x.covered) return;
+    a.raw = x.raw || { info: { currency: "IDR" }, camps: [], sets: [], ads: [] }; a.structAt = Date.now(); buildStructure(a);
+    applyInsights(a, localRows(L, x)); a.err = null; a.loaded = true; done.add(a);
+  });
+  return done;
+}
+async function loadAll(withStructure) {   // withStructure=true (Shift+klik sync) = paksa live Meta untuk semua akun
   if (S.busy) return;
   S.busy = true;
   const t0 = Date.now(), sec = () => Math.round((Date.now() - t0) / 1000);
   const failed = new Set();
+  let local = new Set();
+  if (!withStructure) { try { setLoading("Memuat data tersimpan…"); local = await loadLocal(); } catch (e) { local = new Set(); } }
   const stale = a => withStructure || !a.raw || Date.now() - a.structAt > 30 * 60000;
+  const rest = ACCOUNTS.filter(a => !local.has(a));   // tanggal belum tersimpan lengkap → ambil live dari Meta
   try {
-    const needS = ACCOUNTS.filter(stale);
-    ACCOUNTS.filter(a => !stale(a) && !a.maps).forEach(buildStructure);
+    const needS = rest.filter(stale);
+    rest.filter(a => !stale(a) && !a.maps).forEach(buildStructure);
     if (needS.length) {
       setLoading(`Sync Meta API… struktur ${needS.length} akun sekaligus`);
       const res = await gmulti(needS.flatMap(a => structReqs(a).map(r => ({ acc: a.id, ...r }))));
       needS.forEach((a, i) => { const r = res.slice(i * 4, i * 4 + 4); if (r.some(x => !x || x.error)) failed.add(a); else applyStructure(a, r.map(unwrap)); });
     }
-    const ok = ACCOUNTS.filter(a => a.raw && !failed.has(a));
-    setLoading(`Sync Meta API… angka ${ok.length} akun sekaligus (${sec()} dtk)`);
-    const res = await gmulti(ok.flatMap(a => insightReqs(a).map(r => ({ acc: a.id, ...r }))));
-    ok.forEach((a, i) => {
-      const r = res.slice(i * 3, i * 3 + 3);
-      if (r.some(x => !x || x.error)) { failed.add(a); return; }
-      try { applyInsights(a, r.map(unwrap)); a.err = null; a.loaded = true; } catch (e) { failed.add(a); }
-    });
-  } catch (e) { ACCOUNTS.forEach(a => failed.add(a)); }   // api.php lama / server error → semua lewat jalur cadangan
+    const ok = rest.filter(a => a.raw && !failed.has(a));
+    if (ok.length) {
+      setLoading(`Sync Meta API… angka ${ok.length} akun sekaligus (${sec()} dtk)`);
+      const res = await gmulti(ok.flatMap(a => insightReqs(a).map(r => ({ acc: a.id, ...r }))));
+      ok.forEach((a, i) => {
+        const r = res.slice(i * 3, i * 3 + 3);
+        if (r.some(x => !x || x.error)) { failed.add(a); return; }
+        try { applyInsights(a, r.map(unwrap)); a.err = null; a.loaded = true; } catch (e) { failed.add(a); }
+      });
+    }
+  } catch (e) { rest.forEach(a => failed.add(a)); }   // api.php lama / server error → semua lewat jalur cadangan
+  S.local = local.size;
+  S.localAt = local.size ? new Date(Math.min(...[...local].map(a => +(a.localAt || 0)))) : null;   // akun paling lama diperbarui
   if (failed.size) {
     let done = 0;
     rebuild(); S.lastSync ||= new Date(); render();
@@ -330,7 +361,7 @@ async function loadAll(withStructure) {
       try {
         if (stale(acc) || !acc.raw) await loadStructure(acc); else if (!acc.maps) buildStructure(acc);
         await loadInsights(acc); acc.err = null; acc.loaded = true;
-      } catch (e) { acc.err = e.message; }
+      } catch (e) { acc.err = TOKEN_MSG[acc.localStatus?.token_status] || e.message; }
       setLoading(`Mengulang akun… ${++done}/${failed.size} (${sec()} dtk)`);
     });
   }
@@ -652,8 +683,13 @@ function renderHeader() {
   else $("#scopeLabel").innerHTML = acc ? `${LOGO}<b>${esc(acc.name)}</b><span class="muted">ID ${acc.id}</span>` : `${LOGO}<b>Semua akun</b><span class="muted">${ACCOUNTS.filter(pfOk).length} ad accounts${S.brand !== "all" ? " · " + esc(S.brand) : ""}${S.pf !== "all" ? " · " + esc(S.pf) : ""}</span>`;
   const errs = ACCOUNTS.filter(a => a.err);
   $("#srcBadge").className = "src " + (errs.length ? "warn" : "live");
-  $("#srcBadge").innerHTML = `<span class="flame">🔥</span><b>LIVE</b>${errs.length ? ` · ${errs.length} akun gagal sync` : " · Meta API"}`;
-  $("#updated").textContent = S.lastSync ? `${S.fromCache ? "Data tersimpan" : "Updated"} ${hhmm(S.lastSync)}${S.syncSec != null && !S.fromCache ? ` (${S.syncSec} dtk)` : ""}${S.busy ? " · memperbarui…" : S.to === TODAY ? ` · auto ${CFG.autoRefreshMinutes} mnt` : ""}` : "Menghubungkan…";
+  const src = S.local ? (S.local === ACCOUNTS.length ? "DATA LOKAL" : `LOKAL ${S.local}/${ACCOUNTS.length}`) : "LIVE";
+  $("#srcBadge").innerHTML = `<span class="flame">🔥</span><b>${src}</b>${errs.length ? ` · ${errs.length} akun gagal sync` : S.local ? " · sinkron Meta" : " · Meta API"}`;
+  $("#srcBadge").title = "Klik untuk lihat log sync per akun";
+  const when = d => d.toDateString() === new Date().toDateString() ? hhmm(d) : `${d.toLocaleDateString("id-ID", { day: "numeric", month: "short" })} ${hhmm(d)}`;
+  $("#updated").textContent = S.localAt
+    ? `Data terakhir diperbarui ${when(S.localAt)}${S.refreshing ? " · memperbarui di background…" : S.busy ? " · memuat…" : ""}`
+    : S.lastSync ? `${S.fromCache ? "Data tersimpan" : "Updated"} ${hhmm(S.lastSync)}${S.syncSec != null && !S.fromCache ? ` (${S.syncSec} dtk)` : ""}${S.busy ? " · memperbarui…" : S.to === TODAY ? ` · auto ${CFG.autoRefreshMinutes} mnt` : ""}` : "Menghubungkan…";
   $("#dpLabel").textContent = periodLabel();
   $("#periodRange").textContent = rangeText();
   const kills = ADS.filter(a => isOn(a) && pfOk(a.acc) && AI.get(a.id)?.v === "kill").length;
@@ -1085,7 +1121,17 @@ document.addEventListener("click", ev => {
   const so = t.closest("[data-sort]"); if (so) { const k = so.dataset.sort; S.sort = { k, dir: S.sort.k === k ? -S.sort.dir : (k === "name" ? 1 : -1) }; renderTable(); return; }
   if (t.id === "tSave") { TARGET = { roas: +$("#tRoas").value || TARGET.roas, cpa: +$("#tCpa").value || TARGET.cpa, ctr: +$("#tCtr").value || TARGET.ctr }; store.set("ac_target", TARGET); render(); return; }
   if (t.id === "killAll") { applyStatus(baseRows().filter(e => isOn(e) && AI.get(e.id).v === "kill").map(e => e.id), false); return; }
-  if (t.closest("#srcBadge")) { const errs = ACCOUNTS.filter(a => a.err); if (errs.length) alert(errs.map(a => `${a.name}: ${a.err}`).join("\n")); return; }
+  if (t.closest("#srcBadge")) {   // log sync per akun: waktu, jumlah baris, error
+    const errs = ACCOUNTS.filter(a => a.err);
+    api("sync_status", {}).then(st => {
+      const lines = (st.accounts || []).map(r => `${r.nama}: ${r.status === "ok" ? "OK" : r.status === "jalan" ? "berjalan" : "GAGAL"} ${r.mulai || "-"} (${r.since}..${r.until})`
+        + (r.status === "ok" ? ` · ad ${r.baris_ad} · campaign ${r.baris_campaign} · akun ${r.baris_account} · ${r.token_key}` : "")
+        + (r.error ? `\n   ${r.error}` : "") + (r.token_status && r.token_status !== "ok" ? `\n   ${TOKEN_MSG[r.token_status] || r.error_terakhir}` : ""));
+      alert((errs.length ? `${errs.length} akun gagal sync:\n${errs.map(a => `• ${a.name}: ${a.err}`).join("\n")}\n\n` : "")
+        + `Log sync terakhir per akun${st.running ? ` (${st.running} sedang berjalan)` : ""}:\n${lines.join("\n") || "belum ada"}`);
+    }).catch(() => { if (errs.length) alert(errs.map(a => `${a.name}: ${a.err}`).join("\n")); });
+    return;
+  }
   const row = t.closest("tr[data-id]"); if (row && !t.closest("a,button,input")) openPanel(row.dataset.id);
 });
 document.addEventListener("change", ev => {
@@ -1150,9 +1196,31 @@ $("#qClear").addEventListener("click", ev => { ev.preventDefault(); setQ(""); hi
 $("#accSearch").addEventListener("input", e => { S.accQ = e.target.value.toLowerCase(); renderAccounts(); });
 $("#btnOff").addEventListener("click", () => applyStatus([...S.sel], false));
 $("#btnOn").addEventListener("click", () => applyStatus([...S.sel], true));
-const manualSync = btn => { btn.classList.add("spin"); setTimeout(() => btn.classList.remove("spin"), 700); loadAll(true); };
-$("#syncBtn").addEventListener("click", e => manualSync(e.currentTarget));
-$("#railSync").addEventListener("click", e => manualSync(e.currentTarget));
+async function refreshBg(btn) {   // tarik ulang dari Meta DI SERVER (background) → dashboard tetap bisa dipakai, lalu muat ulang data lokal
+  if (S.refreshing) return;
+  S.refreshing = true; btn?.classList.add("spin"); renderHeader();
+  try {
+    const j = await api("refresh", { from: S.from, to: S.to });
+    if (j.error) throw new Error(j.error.message);
+    const t0 = Date.now();
+    await sleep(3000);
+    while (Date.now() - t0 < 6 * 60000) {   // tunggu sampai semua akun selesai (maks 6 menit)
+      const st = await api("sync_status", {});
+      if (!st.running) break;
+      setLoading(`Memperbarui dari Meta di background… ${st.running} akun berjalan`);
+      await sleep(4000);
+    }
+  } catch (e) { alert("Refresh gagal: " + e.message); }
+  S.refreshing = false; btn?.classList.remove("spin"); setLoading("");
+  await loadAll(false);
+}
+const manualSync = (btn, ev) => {   // klik = refresh background · Shift+klik = paksa ambil live dari Meta (jalur lama)
+  if (ev?.shiftKey) { btn.classList.add("spin"); setTimeout(() => btn.classList.remove("spin"), 700); loadAll(true); return; }
+  refreshBg(btn);
+};
+$("#syncBtn").addEventListener("click", e => manualSync(e.currentTarget, e));
+$("#railSync").addEventListener("click", e => manualSync(e.currentTarget, e));
+$("#syncBtn").title = "Refresh data dari Meta (background) · Shift+klik = ambil live";
 $("#overlay").addEventListener("click", closePanel);
 $("#panelClose").addEventListener("click", closePanel);
 document.addEventListener("keydown", e => {
