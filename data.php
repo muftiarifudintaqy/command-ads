@@ -76,6 +76,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->prepare("INSERT INTO log_ubah (pengguna, merek, tanggal, kolom, lama, baru) VALUES (?,?,CURDATE(),'hapus_akun',?,NULL)")->execute([$user, $a['merek'], substr($a['nama'] . ' ' . $a['act_id'], 0, 40)]);
             $jawab(['ok' => true, 'sheet' => !empty($a['sheet_gid']) ? 'tab sheet dihapus ✓' : '']);
         }
+        if ($aksi === 'akun_id') {   // [21 Okt] tambah akun iklan cukup dengan ID + brand: token, nama, ERP, tab sheet otomatis
+            set_time_limit(180);
+            $mk = ($in['merek'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
+            $act = preg_replace('/\s+/', '', (string)($in['act_id'] ?? '')); if (ctype_digit($act)) $act = 'act_' . $act;
+            if (!preg_match('/^act_\d{6,25}$/', $act)) $jawab(['ok' => false, 'pesan' => 'ID akun iklan harus angka (contoh 1234567890 atau act_1234567890).']);
+            $q = $db->prepare("SELECT nama, merek FROM akun WHERE act_id = ?"); $q->execute([$act]); $ada = $q->fetch();
+            if ($ada) $jawab(['ok' => false, 'pesan' => "Akun ini sudah terdaftar sebagai \"{$ada['nama']}\" (" . ucfirst($ada['merek']) . ').']);
+            $mt = ma_cari_token($act);
+            if (!$mt) $jawab(['ok' => false, 'pesan' => 'Akun belum di-assign ke System User di Business Manager.']);
+            $nama = mb_substr(trim(preg_replace('/[\[\]\*\?\/\\\\:]/', ' ', $mt['nama'])), 0, 90);   // karakter yang tidak boleh di nama tab
+            $q = $db->prepare("SELECT COUNT(*) FROM akun WHERE merek = ? AND nama = ?"); $q->execute([$mk, $nama]);
+            if ($q->fetchColumn()) $jawab(['ok' => false, 'pesan' => "Sudah ada akun bernama \"$nama\" di " . ucfirst($mk) . '. Ganti nama akun di Meta dulu, atau tambahkan lewat Kelola akun.']);
+            $db->prepare("INSERT INTO akun (merek, nama, act_id, token, metode, cpas_only, grup, aktif, urutan) VALUES (?,?,?,?,?,0,NULL,1,99)")
+               ->execute([$mk, $nama, $act, $mt['token'], $mk === 'skinlyfe' ? 'skinlyfe' : 'prepare']);
+            $id = (int)$db->lastInsertId();
+            // ERP ads_meta_account (brand + token); akun yang sudah ada di ERP diperbarui brand/token-nya
+            $erp = ma_erp(); $num = substr($act, 4);
+            $q = $erp->prepare("SELECT id, brand, meta_token, status FROM ads_meta_account WHERE account_id = ?"); $q->execute([$num]); $erpLama = $q->fetch(PDO::FETCH_ASSOC);
+            try {
+                if ($erpLama) $erp->prepare("UPDATE ads_meta_account SET brand = ?, meta_token = ?, status = 1, updated_at = NOW() WHERE id = ?")->execute([ucfirst($mk), $mt['token'], $erpLama['id']]);
+                else $erp->prepare("INSERT INTO ads_meta_account (account_id, account_name, brand, meta_token, status, updated_at, updated_by) VALUES (?,?,?,?,1,NOW(),0)")->execute([$num, $nama, ucfirst($mk), $mt['token']]);
+            } catch (Throwable $e) { $db->prepare("DELETE FROM akun WHERE id = ?")->execute([$id]); $jawab(['ok' => false, 'pesan' => 'Gagal mendaftar di ERP: ' . $e->getMessage() . '. Akun tidak ditambahkan.']); }
+            $bt = ma_buat_tab($id);
+            if (empty($bt['ok'])) {   // gagal → semua dibatalkan (montera + ERP kembali seperti semula)
+                $db->prepare("DELETE FROM akun WHERE id = ?")->execute([$id]);
+                if ($erpLama) $erp->prepare("UPDATE ads_meta_account SET brand = ?, meta_token = ?, status = ? WHERE id = ?")->execute([$erpLama['brand'], $erpLama['meta_token'], $erpLama['status'], $erpLama['id']]);
+                else $erp->prepare("DELETE FROM ads_meta_account WHERE account_id = ? AND account_name = ? AND updated_by = 0 AND created_at >= NOW() - INTERVAL 10 MINUTE")->execute([$num, $nama]);
+                $jawab(['ok' => false, 'pesan' => 'Gagal membuat tab di sheet: ' . ($bt['pesan'] ?? '') . '. Akun tidak ditambahkan.']);
+            }
+            $db->prepare("INSERT INTO log_ubah (pengguna, merek, tanggal, kolom, lama, baru) VALUES (?,?,CURDATE(),'akun_baru',NULL,?)")->execute([$user, $mk, substr($nama . ' ' . $act, 0, 40)]);
+            $db->prepare("UPDATE akun SET status_tarik = 'Menarik data Meta bulan ini…' WHERE id = ?")->execute([$id]);
+            ma_latar('akun_baru', ['id' => $id]);
+            $jawab(['ok' => true, 'id' => $id, 'nama' => $nama, 'token' => $mt['token'], 'erp' => $erpLama ? 'diperbarui' : 'ditambahkan']);
+        }
         if ($aksi === 'tab_baru') {
             $mk = ($in['merek'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
             $q = $db->prepare("SELECT nama FROM akun WHERE merek = ? AND nama LIKE 'Akun Baru%'"); $q->execute([$mk]); $ada = array_column($q->fetchAll(), 'nama');
@@ -603,7 +637,7 @@ body{padding-bottom:60px}
   <a href="<?= e($url(['tab' => 'input', 'akun' => null])) ?>" class="<?= $tab === 'input' ? 'on' : '' ?>">✏️ Input Shopee</a>
   <span class="sep"></span>
   <?php foreach ($AKB as $x): ?><a href="<?= e($url(['tab' => 'akun', 'akun' => $x['id']])) ?>" class="<?= ($tab === 'akun' && $akunAktif === (int)$x['id']) ? 'on' : '' ?> <?= $x['aktif'] ? '' : 'mati' ?>"><?= e($x['nama']) ?></a><?php endforeach; ?>
-  <a id="tabBaru" onclick="tabBaru()" title="Tambah tab akun baru" style="font-size:15px;padding:5px 13px">＋</a>
+  <a id="tabBaru" onclick="tabBaru()" title="Tambah akun iklan (cukup ID)" style="font-size:15px;padding:5px 13px">＋</a>
   <span class="sep"></span>
   <a href="<?= e($url(['tab' => 'akun', 'akun' => null])) ?>" class="<?= ($tab === 'akun' && !$akunAktif) ? 'on' : '' ?>">⚙️ Kelola akun</a>
 </nav>
@@ -673,6 +707,13 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,.tabel::-webkit-scrollbar,.lemba
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', pasang); else pasang();
 })();</script>
+<div class="mdl" id="mdlAkun" hidden><div class="mdl-bg"></div><div class="mdl-kotak" role="dialog" aria-modal="true">
+  <div class="mdl-ikon">＋</div><h3>Tambah akun iklan</h3>
+  <p style="margin-bottom:12px">Cukup ID akun iklan. Nama akun, token, tab sheet, ERP, dan data bulan ini diisi otomatis.</p>
+  <div style="display:flex;gap:8px;margin-bottom:10px"><input id="akId" placeholder="act_1234567890 atau 1234567890" inputmode="numeric" style="flex:1;min-width:0">
+    <select id="akMerk"><option value="prepare">Prepare</option><option value="skinlyfe">Skinlyfe</option></select></div>
+  <p id="akPesan" style="min-height:20px;margin-bottom:12px;color:#b45309"></p>
+  <div class="mdl-tombol"><button class="btn abu" id="akBatal" type="button">Batal</button><button class="btn" id="akOk" type="button">Tambah</button></div></div></div>
 <div class="mdl" id="mdl" hidden><div class="mdl-bg"></div><div class="mdl-kotak" role="dialog" aria-modal="true">
   <div class="mdl-ikon" id="mdlIkon"></div><h3 id="mdlJudul"></h3><p id="mdlPesan"></p>
   <div class="mdl-tombol"><button class="btn abu" id="mdlBatal" type="button">Batal</button><button class="btn" id="mdlOk" type="button">OK</button></div></div></div>
@@ -711,12 +752,24 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,.tabel::-webkit-scrollbar,.lemba
 </script>
 <script>
 var CSRF = <?= json_encode($csrf) ?>, MERK = <?= json_encode($merk) ?>;
+// [21 Okt] "+" = tambah akun iklan cukup dengan ID + brand (token, nama, ERP, tab sheet, data bulan ini otomatis)
 function tabBaru() {
-  var b = document.getElementById('tabBaru'); if (b.dataset.jalan) return; b.dataset.jalan = 1; b.textContent = '…';
-  kirim({ aksi: 'tab_baru', merek: MERK }).then(function (h) {
-    if (!h.ok) { kabar(h.pesan, 'Belum bisa'); b.textContent = '＋'; delete b.dataset.jalan; return; }
-    location.href = location.pathname + '?merk=' + MERK + '&tab=akun&bulan=<?= e($bln) ?>&akun=' + h.id + '&baru=1';
-  }).catch(function () { b.textContent = '＋'; delete b.dataset.jalan; });
+  var m = document.getElementById('mdlAkun'), $ = function (i) { return document.getElementById(i); };
+  $('akId').value = ''; $('akMerk').value = MERK; $('akPesan').textContent = ''; $('akOk').disabled = false; $('akOk').textContent = 'Tambah';
+  m.hidden = false; setTimeout(function () { $('akId').focus(); }, 60);
+  var tutup = function () { m.hidden = true; };
+  $('akBatal').onclick = tutup; m.querySelector('.mdl-bg').onclick = tutup;
+  $('akId').onkeydown = function (e) { if (e.key === 'Enter') $('akOk').click(); if (e.key === 'Escape') tutup(); };
+  $('akOk').onclick = function () {
+    if (!$('akId').value.trim()) { $('akPesan').textContent = 'Isi ID akun iklan.'; return; }
+    $('akOk').disabled = true; $('akOk').textContent = 'Memeriksa…'; $('akPesan').textContent = 'Mencari token yang bisa membuka akun ini, lalu membuat tab di sheet…';
+    kirim({ aksi: 'akun_id', act_id: $('akId').value, merek: $('akMerk').value }).then(function (h) {
+      if (!h.ok) { $('akPesan').textContent = h.pesan; $('akOk').disabled = false; $('akOk').textContent = 'Tambah'; return; }
+      tutup();
+      kabar('"' + h.nama + '" ditambahkan (token ' + h.token + ', ERP ' + h.erp + ', tab sheet dibuat).\nData Meta tanggal 1 s/d hari ini sedang ditarik; ringkasannya dikirim ke WA Mufti.', 'Akun ditambahkan')
+        .then(function () { location.href = location.pathname + '?merk=' + $('akMerk').value + '&tab=akun&bulan=<?= e($bln) ?>&akun=' + h.id; });
+    }).catch(function () { $('akPesan').textContent = 'Gagal, coba lagi.'; $('akOk').disabled = false; $('akOk').textContent = 'Tambah'; });
+  };
 }
 // [data-live] perbarui otomatis saat ada isian baru dari sheet / orang lain (tidak saat sedang mengetik)
 (function () {
