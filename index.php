@@ -175,6 +175,8 @@ $public = [
     if (is_array($bc)) {
         foreach ($bc['tanpa_brand'] ?? [] as $a)
             $bcPesan[] = htmlspecialchars($a['account_name']) . ' (' . htmlspecialchars($a['account_id']) . ') — brand ' . htmlspecialchars($a['brand'] ?: 'kosong') . ', spend 35 hari Rp' . number_format((float)$a['spend'], 0, ',', '.') . ', terakhir ' . htmlspecialchars($a['terakhir']);
+        foreach ($bc['gagal'] ?? [] as $a)
+            $bcPesan[] = htmlspecialchars($a['account_name']) . ' (' . htmlspecialchars($a['account_id']) . ') — GAGAL ditarik ke ERP jam ' . date('H:i', strtotime($bc['waktu'])) . ', angka lama dipertahankan: ' . htmlspecialchars($a['pesan']);
         try {
             $e = []; foreach (@file('/etc/montera-ads-db.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $l) if (strpos($l, '=') !== false) { [$k, $x] = explode('=', $l, 2); $e[trim($k)] = trim($x, " \t\"'"); }
             $pdo = new PDO('mysql:host=' . ($e['DB_HOST'] ?? 'localhost') . ';dbname=' . ($e['DB_NAME'] ?? 'montera_ads') . ';charset=utf8mb4', $e['DB_USER'] ?? '', $e['DB_PASS'] ?? '');
@@ -184,7 +186,7 @@ $public = [
         } catch (Throwable $ex) { }
     }
     if ($bcPesan): ?>
-    <div class="brand-warn" role="alert"><b>Petakan brand akun Meta di ERP</b> (menu Akun Meta → Brand), biaya iklan akun ini belum masuk laba brand mana pun:
+    <div class="brand-warn" role="alert"><b>Cek akun Meta di ERP</b> (menu Akun Meta → Brand), biaya iklan akun ini belum masuk / belum segar di laba:
       <ul><?php foreach ($bcPesan as $p) echo "<li>$p</li>"; ?></ul></div>
 <?php endif; ?>
 
