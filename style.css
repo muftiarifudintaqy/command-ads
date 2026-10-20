@@ -597,3 +597,6 @@ img.mlogo{width:1.3em;height:1.1em;object-fit:contain;vertical-align:-.22em;flex
 .acc-pick:hover{border-color:#6a4dff}
 .acc-pick.on{background:#6a4dff;border-color:#6a4dff}
 .acc-clear{font-size:12px;font-weight:600;color:#d01c39;cursor:pointer;margin-left:6px}
+
+.brand-warn{margin:0 0 12px;padding:10px 14px;border:1px solid #f6d8a8;background:#fef3e0;color:#7a4a00;border-radius:10px;font-size:13px;line-height:1.45}
+.brand-warn ul{margin:6px 0 0;padding-left:18px}

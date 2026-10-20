@@ -168,6 +168,25 @@ $public = [
         <div class="avatar" title="Mufti Arifudin Taqy">MT</div>
       </div>
     </header>
+<?php
+    /* peringatan brand iklan Meta di ERP: file status ditulis /root/meta_ads_sync.php (cron tiap 30 menit) */
+    $bc = json_decode((string)@file_get_contents('/var/lib/montera-ads/meta-brand-cek.json'), true);
+    $bcPesan = [];
+    if (is_array($bc)) {
+        foreach ($bc['tanpa_brand'] ?? [] as $a)
+            $bcPesan[] = htmlspecialchars($a['account_name']) . ' (' . htmlspecialchars($a['account_id']) . ') — brand ' . htmlspecialchars($a['brand'] ?: 'kosong') . ', spend 35 hari Rp' . number_format((float)$a['spend'], 0, ',', '.') . ', terakhir ' . htmlspecialchars($a['terakhir']);
+        try {
+            $e = []; foreach (@file('/etc/montera-ads-db.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $l) if (strpos($l, '=') !== false) { [$k, $x] = explode('=', $l, 2); $e[trim($k)] = trim($x, " \t\"'"); }
+            $pdo = new PDO('mysql:host=' . ($e['DB_HOST'] ?? 'localhost') . ';dbname=' . ($e['DB_NAME'] ?? 'montera_ads') . ';charset=utf8mb4', $e['DB_USER'] ?? '', $e['DB_PASS'] ?? '');
+            $erp = array_flip($bc['erp_akun'] ?? []);
+            foreach ($pdo->query("SELECT nama, act_id FROM akun WHERE aktif = 1 AND act_id IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC) as $a)
+                if (!isset($erp[preg_replace('/^act_/', '', $a['act_id'])])) $bcPesan[] = htmlspecialchars($a['nama']) . ' (' . htmlspecialchars($a['act_id']) . ') — belum ada di ERP Akun Meta, biaya iklannya belum masuk laba';
+        } catch (Throwable $ex) { }
+    }
+    if ($bcPesan): ?>
+    <div class="brand-warn" role="alert"><b>Petakan brand akun Meta di ERP</b> (menu Akun Meta → Brand), biaya iklan akun ini belum masuk laba brand mana pun:
+      <ul><?php foreach ($bcPesan as $p) echo "<li>$p</li>"; ?></ul></div>
+<?php endif; ?>
 
     <!-- AKUN (nyamping) -->
     <section class="card acc-card">
