@@ -30,40 +30,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!in_array($kol, ['cost', 'omset', 'pesanan', 'roas', 'catatan'], true)) $jawab(['ok' => false, 'pesan' => 'Kolom tidak valid']);
             $raw = trim((string)($in['nilai'] ?? ''));
             $nilai = $kol === 'roas' ? ($raw === '' || !is_numeric(str_replace(',', '.', $raw)) ? null : round((float)str_replace(',', '.', $raw), 2)) : ($kol === 'catatan' ? ($raw === '' ? null : mb_substr($raw, 0, 250)) : ($raw === '' ? null : (int)preg_replace('/\D/', '', $raw)));
+            // [sheet-patokan] angka ditulis ke sheet dulu (doPost, hanya kolom ini); gagal = tidak disimpan, error ditampilkan; sukses = baca ulang dari sheet
+            $dariSheet = null;
+            if ($kol !== 'catatan') {
+                $j = ma_post_sheet_raw(['merek' => $mk, 'tanggal' => $tgl, $kol => $nilai]);
+                if (empty($j['ok'])) $jawab(['ok' => false, 'pesan' => 'Gagal menulis ke sheet: ' . ($j['error'] ?? 'sheet tidak menjawab') . '. Angka tidak disimpan.']);
+                $ls = ma_sheet_cache($mk, (int)substr($tgl, 0, 4), (int)substr($tgl, 5, 2), true);
+                $dariSheet = $ls['data'][$tgl]['SHOPEE|' . $kol] ?? null;
+            }
             $q = $db->prepare("SELECT $kol FROM shopee_harian WHERE merek = ? AND tanggal = ?"); $q->execute([$mk, $tgl]); $lama = $q->fetchColumn();
             $db->prepare("INSERT INTO shopee_harian (merek, tanggal, $kol, sumber, diubah_oleh, diubah_at) VALUES (?,?,?,'sistem',?,NOW())
                 ON DUPLICATE KEY UPDATE $kol = VALUES($kol), sumber = 'sistem', diubah_oleh = VALUES(diubah_oleh), diubah_at = NOW()")->execute([$mk, $tgl, $nilai, $user]);
             $db->prepare("INSERT INTO log_ubah (pengguna, merek, tanggal, kolom, lama, baru) VALUES (?,?,?,?,?,?)")
                ->execute([$user, $mk, $tgl, $kol, $lama === false ? null : (string)$lama, $nilai === null ? null : (string)$nilai]);
-            $ks = $kol === 'catatan' ? '' : ma_kirim_belakang('shopee', $mk, $tgl);
-            $jawab(['ok' => true, 'oleh' => $user, 'jam' => date('H:i'), 'sheet' => $ks]);
+            $jawab(['ok' => true, 'oleh' => $user, 'jam' => date('H:i'), 'sheet' => $kol === 'catatan' ? '' : 'masuk sheet ✓', 'nilai_sheet' => $dariSheet]);
         }
         if ($aksi === 'meta') {
             $aid = (int)($in['akun'] ?? 0); $tgl = (string)($in['tanggal'] ?? ''); $kol = (string)($in['kolom'] ?? '');
             if (!$aid || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $tgl) || $tgl > date('Y-m-d')) $jawab(['ok' => false, 'pesan' => 'Tanggal tidak valid']);
             if (!in_array($kol, ['spend', 'omset', 'purchase', 'vc', 'atc'], true)) $jawab(['ok' => false, 'pesan' => 'Kolom tidak valid']);
             $raw = trim((string)($in['nilai'] ?? '')); $nilai = $raw === '' ? null : (int)preg_replace('/\D/', '', $raw);
+            // [sheet-patokan] baris tanggal ini dibaca dari tab sheet, kolom yang diubah diganti, lalu ditulis ke tab (doPost); gagal = tidak disimpan
+            $q = $db->prepare("SELECT * FROM akun WHERE id = ?"); $q->execute([$aid]); $ak = $q->fetch();
+            if (!$ak || !$ak['sheet_gid']) $jawab(['ok' => false, 'pesan' => 'Akun ini belum punya tab di sheet.']);
+            $thT = (int)substr($tgl, 0, 4); $blT = (int)substr($tgl, 5, 2);
+            $tb = ma_tab_banyak([$ak], $thT, $blT, true)[$aid];
+            if ($tb['galat']) $jawab(['ok' => false, 'pesan' => 'Tab sheet tidak terbaca: ' . $tb['galat'] . '. Angka tidak disimpan.']);
+            $baris = ($tb['data'][$tgl] ?? []) + ['spend' => null, 'omset' => null, 'purchase' => null, 'vc' => null, 'atc' => null]; $baris[$kol] = $nilai;
+            $j = ma_post_sheet_raw(['jenis' => 'akun', 'merek' => $ak['merek'], 'gid' => (int)$ak['sheet_gid'], 'nama_tab' => $ak['nama'], 'tanggal' => $tgl] + $baris);
+            if (empty($j['ok'])) $jawab(['ok' => false, 'pesan' => 'Gagal menulis ke sheet: ' . ($j['error'] ?? 'sheet tidak menjawab') . '. Angka tidak disimpan.']);
+            $dariSheet = ma_tab_banyak([$ak], $thT, $blT, true)[$aid]['data'][$tgl][$kol] ?? null;
             $db->prepare("INSERT INTO meta_harian (akun_id, tanggal, $kol, manual) VALUES (?,?,?,1) ON DUPLICATE KEY UPDATE $kol = VALUES($kol), manual = 1")->execute([$aid, $tgl, $nilai]);
             $db->prepare("INSERT INTO log_ubah (pengguna, merek, tanggal, kolom, lama, baru) VALUES (?,?,?,?,?,?)")->execute([$user, 'akun#' . $aid, $tgl, $kol, null, (string)$nilai]);
             $db->prepare("DELETE FROM meta_harian WHERE akun_id = ? AND tanggal = ? AND spend IS NULL AND omset IS NULL AND purchase IS NULL AND vc IS NULL AND atc IS NULL")->execute([$aid, $tgl]);
-            $jawab(['ok' => true, 'jam' => date('H:i'), 'sheet' => ma_kirim_belakang('akun', (string)$aid, $tgl)]);
+            $jawab(['ok' => true, 'jam' => date('H:i'), 'sheet' => 'masuk sheet ✓', 'nilai_sheet' => $dariSheet]);
         }
         if ($aksi === 'hapus_akun') {
             $q = $db->prepare("SELECT * FROM akun WHERE id = ?"); $q->execute([(int)($in['id'] ?? 0)]); $a = $q->fetch();
             if (!$a) $jawab(['ok' => false, 'pesan' => 'Akun tidak ditemukan']);
+            // [sheet-patokan] tab di sheet dihapus dulu (doPost langsung); gagal = akun tidak dihapus
+            if (!empty($a['sheet_gid'])) { $j = ma_post_sheet_raw(['jenis' => 'hapus_tab', 'merek' => $a['merek'], 'gid' => (int)$a['sheet_gid'], 'nama_lama' => $a['nama']]);
+                if (empty($j['ok'])) $jawab(['ok' => false, 'pesan' => 'Gagal menghapus tab di sheet: ' . ($j['error'] ?? 'sheet tidak menjawab') . '. Akun tidak dihapus.']); }
             $db->prepare("DELETE FROM meta_harian WHERE akun_id = ?")->execute([$a['id']]);
             $db->prepare("DELETE FROM akun WHERE id = ?")->execute([$a['id']]);
             $db->prepare("INSERT INTO log_ubah (pengguna, merek, tanggal, kolom, lama, baru) VALUES (?,?,CURDATE(),'hapus_akun',?,NULL)")->execute([$user, $a['merek'], substr($a['nama'] . ' ' . $a['act_id'], 0, 40)]);
-            if (!empty($a['sheet_gid'])) ma_latar('post', ['data' => ['jenis' => 'hapus_tab', 'merek' => $a['merek'], 'gid' => (int)$a['sheet_gid'], 'nama_lama' => $a['nama']]]); $ks = '';
-            $jawab(['ok' => true, 'sheet' => $ks]);
+            $jawab(['ok' => true, 'sheet' => !empty($a['sheet_gid']) ? 'tab sheet dihapus ✓' : '']);
         }
         if ($aksi === 'tab_baru') {
             $mk = ($in['merek'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
             $q = $db->prepare("SELECT nama FROM akun WHERE merek = ? AND nama LIKE 'Akun Baru%'"); $q->execute([$mk]); $ada = array_column($q->fetchAll(), 'nama');
             $nama = 'Akun Baru'; for ($i = 2; in_array($nama, $ada, true); $i++) $nama = 'Akun Baru ' . $i;
             $db->prepare("INSERT INTO akun (merek, nama, act_id, token, metode, grup, aktif, urutan) VALUES (?,?,NULL,'prepare',?,NULL,1,99)")->execute([$mk, $nama, $mk === 'skinlyfe' ? 'skinlyfe' : 'prepare']);
-            $id = (int)$db->lastInsertId(); ma_latar('buat_tab', ['id' => $id]);
-            $jawab(['ok' => true, 'id' => $id, 'tab' => 'tab di sheet sedang dibuat']);
+            // [sheet-patokan] tab sheet dibuat langsung; gagal = akun dibatalkan & error ditampilkan
+            $id = (int)$db->lastInsertId(); $bt = ma_buat_tab($id);
+            if (empty($bt['ok'])) { $db->prepare("DELETE FROM akun WHERE id = ?")->execute([$id]); $jawab(['ok' => false, 'pesan' => 'Gagal membuat tab di sheet: ' . ($bt['pesan'] ?? '') . '. Akun tidak ditambahkan.']); }
+            $jawab(['ok' => true, 'id' => $id, 'tab' => 'tab di sheet sudah dibuat ✓']);
         }
         if ($aksi === 'akun') {
             $id = (int)($in['id'] ?? 0); $mk = ($in['merek'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
@@ -71,14 +92,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (strpos($act, 'act_') !== 0 && ctype_digit($act)) $act = 'act_' . $act;
             if ($nama === '' || ($act !== '' && !preg_match('/^act_\d{6,25}$/', $act))) $jawab(['ok' => false, 'pesan' => 'Isi nama, dan ID akun iklan berupa angka (contoh act_1234567890).']);
             if ($act === '') $act = null;
-            $tok = in_array($in['token'] ?? '', ['prepare', 'marketBeauty', 'glowingCantik'], true) ? $in['token'] : 'prepare';
+            $tok = in_array($in['token'] ?? '', ['prepare', 'marketBeauty', 'glowingCantik', 'glowyGlow'], true) ? $in['token'] : 'prepare';
             $v = [$mk, $nama, $act, $tok, $mk === 'skinlyfe' ? 'skinlyfe' : 'prepare', empty($in['cpas_only']) ? 0 : 1, trim((string)($in['grup'] ?? '')) ?: null, empty($in['aktif']) ? 0 : 1, ((int)($in['sheet_gid'] ?? 0)) ?: null];
             if ($id) {
                 $q = $db->prepare("SELECT nama, sheet_gid, isi_sheet FROM akun WHERE id = ?"); $q->execute([$id]); $lama = $q->fetch() ?: [];
+                // [sheet-patokan] ganti nama tab di sheet dulu (doPost langsung); gagal = tidak disimpan
+                if (!empty($lama['sheet_gid']) && $lama['nama'] !== $nama) { $j = ma_post_sheet_raw(['jenis' => 'ganti_nama', 'merek' => $mk, 'gid' => (int)$lama['sheet_gid'], 'nama_lama' => $lama['nama'], 'nama' => $nama, 'judul' => (int)$lama['isi_sheet']]);
+                    if (empty($j['ok'])) $jawab(['ok' => false, 'pesan' => 'Gagal mengganti nama tab di sheet: ' . ($j['error'] ?? 'sheet tidak menjawab') . '. Belum disimpan.']); }
                 $v[] = $id; $db->prepare("UPDATE akun SET merek=?, nama=?, act_id=?, token=?, metode=?, cpas_only=?, grup=?, aktif=?, sheet_gid=? WHERE id=?")->execute($v);
-                if (!empty($lama['sheet_gid']) && $lama['nama'] !== $nama) ma_latar('post', ['data' => ['jenis' => 'ganti_nama', 'merek' => $mk, 'gid' => (int)$lama['sheet_gid'], 'nama_lama' => $lama['nama'], 'nama' => $nama, 'judul' => (int)$lama['isi_sheet']]]);
             }
-            else { $db->prepare("INSERT INTO akun (merek, nama, act_id, token, metode, cpas_only, grup, aktif, sheet_gid, urutan) VALUES (?,?,?,?,?,?,?,?,?,99)")->execute($v); $id = (int)$db->lastInsertId(); ma_latar('buat_tab', ['id' => $id]); $jawab(['ok' => true, 'id' => $id, 'tab' => 'Tab di sheet sedang dibuat']); }
+            else { $db->prepare("INSERT INTO akun (merek, nama, act_id, token, metode, cpas_only, grup, aktif, sheet_gid, urutan) VALUES (?,?,?,?,?,?,?,?,?,99)")->execute($v); $id = (int)$db->lastInsertId();
+                if (empty($v[8])) { $bt = ma_buat_tab($id);   // gid belum diisi → tab dibuat langsung; gagal = akun dibatalkan
+                    if (empty($bt['ok'])) { $db->prepare("DELETE FROM akun WHERE id = ?")->execute([$id]); $jawab(['ok' => false, 'pesan' => 'Gagal membuat tab di sheet: ' . ($bt['pesan'] ?? '') . '. Akun tidak ditambahkan.']); } }
+                $jawab(['ok' => true, 'id' => $id, 'tab' => empty($v[8]) ? 'Tab di sheet sudah dibuat ✓' : 'Tersambung ke tab sheet gid ' . $v[8]]); }
             $jawab(['ok' => true, 'id' => $id]);
         }
         if ($aksi === 'tarik') {
@@ -98,9 +124,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 if (isset($_GET['ping'])) {
     header('Content-Type: application/json');
     $mk = ($_GET['merk'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
-    $q = $db->prepare("SELECT CONCAT(IFNULL((SELECT MAX(diubah_at) FROM shopee_harian WHERE merek = ?), ''), '|',
-        IFNULL((SELECT MAX(m.diambil_at) FROM meta_harian m JOIN akun k ON k.id = m.akun_id WHERE k.merek = ?), ''), '|', (SELECT CONCAT(COUNT(*), '-', IFNULL(SUM(sheet_gid),0), '-', IFNULL(MAX(CHAR_LENGTH(IFNULL(status_tarik,''))),0)) FROM akun))");
-    $q->execute([$mk, $mk]); echo json_encode(['v' => $q->fetchColumn()]); exit;
+    // [sheet-patokan] berubah kalau isi sheet (cache tab SHOPEE X CPAS bulan ini) berubah, ada isian baru, atau daftar akun berubah
+    $q = $db->prepare("SELECT CONCAT(IFNULL((SELECT MAX(diubah_at) FROM shopee_harian WHERE merek = ?), ''), '|', (SELECT CONCAT(COUNT(*), '-', IFNULL(SUM(sheet_gid),0), '-', IFNULL(MAX(CHAR_LENGTH(IFNULL(status_tarik,''))),0)) FROM akun))");
+    $q->execute([$mk]); $c = json_decode((string)@file_get_contents('/var/lib/montera-ads/cache/lap_' . $mk . '_' . date('Y') . '_' . date('n') . '.json'), true);
+    echo json_encode(['v' => $q->fetchColumn() . '|' . md5(json_encode($c['data'] ?? null))]); exit;
 }
 /* ===================== DATA ===================== */
 $merk = ($_GET['merk'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
@@ -114,9 +141,23 @@ $label = function (string $t) use ($NB, $NH) { $u = strtotime($t); return $NH[(i
 
 $q = $db->prepare("SELECT * FROM shopee_harian WHERE merek = ? AND tanggal BETWEEN ? AND ?"); $q->execute([$merk, $awal, $akhir]);
 $SH = []; foreach ($q->fetchAll() as $r) $SH[$r['tanggal']] = $r;
-$q = $db->prepare("SELECT m.tanggal, SUM(m.spend) s, SUM(m.omset) o, SUM(m.purchase) p, SUM(m.atc) a FROM meta_harian m JOIN akun k ON k.id = m.akun_id
-    WHERE k.merek = ? AND m.tanggal BETWEEN ? AND ? GROUP BY m.tanggal"); $q->execute([$merk, $awal, $akhir]);
-$ME = []; foreach ($q->fetchAll() as $r) $ME[$r['tanggal']] = $r;
+/* [sheet-patokan] angka Laporan, kartu, total & Input Shopee = PERSIS tab SHOPEE X CPAS di sheet (cache maks 5 menit, ?segar=1 baca ulang).
+   Catatan & riwayat ubah tetap dari server. Bulan yang tidak punya file sheet: angka server, diberi tanda. */
+$segar = isset($_GET['segar']);
+$LS = ma_sheet_cache($merk, $th, $bl, $segar);
+$sheetAda = is_array($LS['data']); $dataPer = $LS['waktu'] ? (int)$LS['waktu'] : null; $galatSheet = $LS['galat'];
+if ($sheetAda) {
+    foreach ($SH as $t => $r) foreach (['cost', 'omset', 'pesanan', 'roas'] as $k) $SH[$t][$k] = null;
+    $ME = [];
+    foreach ($LS['data'] as $t => $o) {
+        $SH[$t] = array_merge($SH[$t] ?? [], ['cost' => $o['SHOPEE|cost'] ?? null, 'omset' => $o['SHOPEE|omset'] ?? null, 'pesanan' => $o['SHOPEE|pesanan'] ?? null, 'roas' => $o['SHOPEE|roas'] ?? null]);
+        $ME[$t] = ['s' => $o['CPAS M|cost'] ?? null, 'o' => $o['CPAS M|omset'] ?? null, 'p' => $o['CPAS M|purchases with shared items'] ?? $o['CPAS M|pesanan'] ?? null, 'a' => $o['CPAS M|adds to cart with shared items'] ?? null];
+    }
+} else {
+    $q = $db->prepare("SELECT m.tanggal, SUM(m.spend) s, SUM(m.omset) o, SUM(m.purchase) p, SUM(m.atc) a FROM meta_harian m JOIN akun k ON k.id = m.akun_id
+        WHERE k.merek = ? AND m.tanggal BETWEEN ? AND ? GROUP BY m.tanggal"); $q->execute([$merk, $awal, $akhir]);
+    $ME = []; foreach ($q->fetchAll() as $r) $ME[$r['tanggal']] = $r;
+}
 
 $HARI = []; $TOT = ['sc' => 0, 'so' => 0, 'sp' => 0, 'mc' => 0, 'mo' => 0, 'mp' => 0, 'ma' => 0, 'ca' => 0, 'n' => 0];
 for ($d = 1; $d <= $jml; $d++) {
@@ -221,6 +262,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
   <div class="tab"><a href="<?= e($url(['tab' => 'laporan'])) ?>" class="<?= $tab === 'laporan' ? 'on' : '' ?>">Laporan</a><a href="<?= e($url(['tab' => 'tahun'])) ?>" class="<?= $tab === 'tahun' ? 'on' : '' ?>">Tahunan</a><a href="<?= e($url(['tab' => 'input'])) ?>" class="<?= $tab === 'input' ? 'on' : '' ?>">Input Shopee</a><a href="<?= e($url(['tab' => 'akun', 'akun' => null])) ?>" class="<?= $tab === 'akun' ? 'on' : '' ?>">Akun CPAS</a></div>
   <form method="get"><input type="hidden" name="merk" value="<?= e($merk) ?>"><input type="hidden" name="tab" value="<?= e($tab) ?>"><input type="month" name="bulan" value="<?= e($bln) ?>" onchange="this.form.submit()"></form>
   <span class="kanan">Masuk sebagai <b><?= e($user) ?></b> · <a href="laporan.php?merk=<?= e($merk) ?>&bulan=<?= e($bln) ?>">versi sheet</a></span>
+  <span class="kanan" id="dataSheet" style="margin-left:10px"></span>
 </div>
 <div class="isi">
 <?php if ($tab === 'laporan'):
@@ -313,8 +355,19 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
     foreach ($q->fetchAll() as $r) { $o[(int)$r['b']]['sc'] = (float)$r['sc']; $o[(int)$r['b']]['so'] = (float)$r['so']; $o[(int)$r['b']]['sp'] = (float)$r['sp']; }
     $q = $db->prepare("SELECT MONTH(m.tanggal) b, SUM(m.spend) mc, SUM(m.omset) mo, SUM(m.purchase) mp FROM meta_harian m JOIN akun k ON k.id = m.akun_id WHERE k.merek = ? AND YEAR(m.tanggal) = ? GROUP BY b"); $q->execute([$merk, $y]);
     foreach ($q->fetchAll() as $r) { $o[(int)$r['b']]['mc'] = (float)$r['mc']; $o[(int)$r['b']]['mo'] = (float)$r['mo']; $o[(int)$r['b']]['mp'] = (float)$r['mp']; }
+    // [sheet-patokan] bulan yang punya file sheet: angka = jumlah harian tab SHOPEE X CPAS; bulan tanpa file sheet tetap angka server
+    global $segar, $bulanServer, $waktuTahun;
+    $daftar = []; for ($i = 1; $i <= 12; $i++) if (sprintf('%04d-%02d', $y, $i) <= date('Y-m')) $daftar[] = [$y, $i];
+    foreach (ma_sheet_banyak($merk, $daftar, $segar) as $k => $hari) {
+        $i = (int)explode('-', $k)[1];
+        if (!is_array($hari)) { if ($o[$i]['sc'] || $o[$i]['so'] || $o[$i]['mc']) $bulanServer[] = substr($GLOBALS['NB'][$i], 0, 3) . ' ' . $y; continue; }
+        $o[$i] = ['sc' => 0, 'so' => 0, 'sp' => 0, 'mc' => 0, 'mo' => 0, 'mp' => 0];
+        foreach ($hari as $x) foreach (['sc' => 'SHOPEE|cost', 'so' => 'SHOPEE|omset', 'sp' => 'SHOPEE|pesanan', 'mc' => 'CPAS M|cost', 'mo' => 'CPAS M|omset', 'mp' => 'CPAS M|purchases with shared items'] as $kk => $kol) $o[$i][$kk] += (float)($x[$kol] ?? ($kk === 'mp' ? ($x['CPAS M|pesanan'] ?? 0) : 0));
+        $f = "/var/lib/montera-ads/cache/lap_{$merk}_{$y}_{$i}.json"; if (is_file($f)) $waktuTahun = min($waktuTahun ?? PHP_INT_MAX, (int)filemtime($f));
+    }
     return $o;
   };
+  $bulanServer = []; $waktuTahun = null;
   $Y = $ambilTahun($thn); $P = $ambilTahun($thn - 1); $sampai = $thn == (int)date('Y') ? (int)date('n') : 12;
   $jumlah = function ($arr) use ($sampai) { $t = ['sc' => 0, 'so' => 0, 'sp' => 0, 'mc' => 0, 'mo' => 0, 'mp' => 0]; for ($i = 1; $i <= $sampai; $i++) foreach ($t as $k => $_) $t[$k] += $arr[$i][$k]; return $t; };
   $tY = $jumlah($Y); $tP = $jumlah($P);
@@ -383,12 +436,24 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
 
 <?php else:
   $akunId = (int)($_GET['akun'] ?? 0);
-  $q = $db->prepare("SELECT k.*, SUM(m.spend) s, SUM(m.omset) o, SUM(m.purchase) p FROM akun k LEFT JOIN meta_harian m ON m.akun_id = k.id AND m.tanggal BETWEEN ? AND ?
-      WHERE k.merek = ? GROUP BY k.id ORDER BY k.aktif DESC, k.urutan, k.id"); $q->execute([$awal, $akhir, $merk]); $AK = $q->fetchAll();
+  $q = $db->prepare("SELECT k.* FROM akun k WHERE k.merek = ? ORDER BY k.aktif DESC, k.urutan, k.id"); $q->execute([$merk]); $AK = $q->fetchAll();
+  if (!$akunId) {   // [sheet-patokan] spend/omset/purchase bulan ini per akun = jumlah tab akun di sheet
+    $TBS = ma_tab_banyak($AK, $th, $bl, $segar); $galatTab = [];
+    foreach ($AK as $n => $r) { $x = $TBS[$r['id']] ?? null; $AK[$n]['s'] = $AK[$n]['o'] = $AK[$n]['p'] = 0;
+      if (!empty($x['galat'])) $galatTab[] = $r['nama'] . ': ' . $x['galat'];
+      if ($x && $x['waktu']) $dataPer = min($dataPer ?? PHP_INT_MAX, (int)$x['waktu']);
+      foreach ((array)($x['data'] ?? []) as $h) { $AK[$n]['s'] += (float)$h['spend']; $AK[$n]['o'] += (float)$h['omset']; $AK[$n]['p'] += (float)$h['purchase']; } }
+    if ($galatTab) $galatSheet = implode('; ', $galatTab);
+  }
   if ($akunId):
     $q = $db->prepare("SELECT * FROM akun WHERE id = ?"); $q->execute([$akunId]); $ak = $q->fetch() ?: ['nama' => '', 'act_id' => '', 'sheet_gid' => null];
-    $q = $db->prepare("SELECT * FROM meta_harian WHERE akun_id = ? AND tanggal BETWEEN ? AND ?"); $q->execute([$akunId, $awal, $akhir]);
-    $DHm = []; foreach ($q->fetchAll() as $x) $DHm[$x['tanggal']] = $x;
+    // [sheet-patokan] isi tabel akun = tab akun ini di sheet (cache maks 5 menit); akun tanpa tab: data server
+    $DHm = []; $TB = !empty($ak['sheet_gid']) ? ma_tab_banyak([$ak + ['id' => $akunId]], $th, $bl, $segar)[$akunId] : null;
+    if ($TB && is_array($TB['data'])) { $dataPer = $TB['waktu'] ? (int)$TB['waktu'] : null; $galatSheet = $TB['galat'];
+      foreach ($TB['data'] as $tg => $x) if (array_filter($x, function ($v) { return $v !== null; })) $DHm[$tg] = $x; }
+    else { $sheetAda = false; $galatSheet = $TB['galat'] ?? 'akun belum punya tab di sheet';
+      $q = $db->prepare("SELECT * FROM meta_harian WHERE akun_id = ? AND tanggal BETWEEN ? AND ?"); $q->execute([$akunId, $awal, $akhir]);
+      foreach ($q->fetchAll() as $x) $DHm[$x['tanggal']] = $x; }
     $tt = ['spend' => 0, 'omset' => 0, 'purchase' => 0, 'vc' => 0, 'atc' => 0]; $akhirIsi = null;
     foreach ($DHm as $tg => $x) { foreach ($tt as $k => $_) $tt[$k] += (float)$x[$k]; if ((float)$x['spend'] > 0 && ($akhirIsi === null || $tg > $akhirIsi)) $akhirIsi = $tg; }
     $kotak = function ($judul, $sub, $sp, $om, $pu) { return '<div class="kt2"><div class="h">' . e($judul) . '<small>' . e($sub) . '</small></div><table>'
@@ -424,7 +489,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
     <b style="margin-right:4px">Pengaturan akun</b>
     <input id="sNama" value="<?= e($ak['nama']) ?>" title="Nama akun, juga nama tab di sheet" style="min-width:250px;font-weight:700">
     <input id="sAct" value="<?= e($ak['act_id'] ?? '') ?>" placeholder="ID akun iklan (act_123…)" style="min-width:210px">
-    <select id="sTok"><?php foreach (['prepare' => 'Token Prepare / Skinlyfe', 'glowingCantik' => 'Token Glowing Cantik', 'marketBeauty' => 'Token Market Beauty'] as $k => $l): ?><option value="<?= $k ?>" <?= ($ak['token'] ?? '') === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select>
+    <select id="sTok"><?php foreach (['prepare' => 'Token Prepare / Skinlyfe', 'glowingCantik' => 'Token Glowing Cantik', 'marketBeauty' => 'Token Market Beauty', 'glowyGlow' => 'Token Glowy Glow'] as $k => $l): ?><option value="<?= $k ?>" <?= ($ak['token'] ?? '') === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select>
     <input id="sGrup" value="<?= e($ak['grup'] ?? '') ?>" placeholder="Grup (opsional)" style="width:150px">
     <label><input type="checkbox" id="sCpas" <?= !empty($ak['cpas_only']) ? 'checked' : '' ?>> hanya katalog</label>
     <label><input type="checkbox" id="sAktif" <?= !isset($ak['aktif']) || $ak['aktif'] ? 'checked' : '' ?>> aktif</label>
@@ -495,6 +560,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
         var tr = el.closest('tr'), x = n(el.value); el.classList.add('simpan');
         kirim({ aksi: 'meta', akun: AKUN, tanggal: tr.dataset.t, kolom: el.dataset.k, nilai: x == null ? '' : x }).then(function (h) {
           el.classList.remove('simpan'); el.classList.add(h.ok ? 'oke' : 'gagal'); el.title = h.ok ? 'Tersimpan ' + h.jam + ' · ' + h.sheet : h.pesan; toast(h.ok ? '✓ Tersimpan ' + h.jam + ' · ' + h.sheet : '✗ ' + h.pesan, h.ok);
+          if (h.ok && h.nilai_sheet !== undefined) el.value = h.nilai_sheet === null ? '' : (el.dataset.f === 'rp' ? rp(h.nilai_sheet) : an(h.nilai_sheet));   // [sheet-patokan] nilai dibaca ulang dari sheet
           setTimeout(function () { el.classList.remove('oke'); }, 1500); if (h.ok) awal = el.value; else { el.value = awal; } hitung(tr);
         });
       });
@@ -508,7 +574,7 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
     <input id="aNama" placeholder="Nama akun (mis. PREPARE CPAS - HK 6)" style="min-width:260px">
     <input id="aAct" placeholder="ID akun iklan (act_123…)" style="min-width:200px">
     <input id="aGrup" placeholder="Grup (mis. Prepare CPAS)"><input id="aGid" placeholder="gid tab di sheet (opsional)" style="width:190px">
-    <select id="aTok"><option value="prepare">Token Prepare / Skinlyfe</option><option value="glowingCantik">Token Glowing Cantik</option><option value="marketBeauty">Token Market Beauty</option></select>
+    <select id="aTok"><option value="prepare">Token Prepare / Skinlyfe</option><option value="glowingCantik">Token Glowing Cantik</option><option value="marketBeauty">Token Market Beauty</option><option value="glowyGlow">Token Glowy Glow</option></select>
     <label><input type="checkbox" id="aCpas"> hanya katalog</label><label><input type="checkbox" id="aAktif" checked> aktif</label>
     <button class="btn" id="aSimpan">Simpan</button><button class="btn abu" id="aBatal" type="button">Batal</button><span class="st" id="aPesan"></span>
   </div>
@@ -674,7 +740,8 @@ document.querySelectorAll('input.inp').forEach(function (el) {
     var tr = el.closest('tr'), st = tr.querySelector('.st');
     st.className = 'st'; st.textContent = 'menyimpan…';
     kirim({ aksi: 'shopee', merek: MERK, tanggal: tr.dataset.t, kolom: el.dataset.k, nilai: el.value }).then(function (h) {
-      if (h.ok) { st.className = 'st ok'; st.textContent = '✓ ' + h.oleh + ' · ' + h.jam + (h.sheet ? ' · ' + h.sheet : ''); awal = el.value; }
+      if (h.ok) { if (h.nilai_sheet !== undefined && el.dataset.k !== 'catatan') el.value = h.nilai_sheet === null ? '' : (el.dataset.k === 'roas' ? Number(h.nilai_sheet).toFixed(2).replace('.', ',') : Math.round(h.nilai_sheet).toLocaleString('id-ID'));   // [sheet-patokan] nilai dibaca ulang dari sheet
+        st.className = 'st ok'; st.textContent = '✓ ' + h.oleh + ' · ' + h.jam + (h.sheet ? ' · ' + h.sheet : ''); awal = el.value; }
       else { st.className = 'st salah'; st.textContent = h.pesan; el.value = awal; }
     }).catch(function () { st.className = 'st salah'; st.textContent = 'gagal, coba lagi'; });
   });
@@ -713,5 +780,17 @@ if (f) {
   }
   window.addEventListener('load', pas); window.addEventListener('resize', pas); setTimeout(pas, 300);
 })();
+</script>
+<?php
+// [sheet-patokan] label sumber data + tombol muat ulang
+$wkt = $tab === 'tahun' ? $waktuTahun : $dataPer;
+$lbl = $sheetAda ? 'data sheet per <b>' . ($wkt ? date('H:i', (int)$wkt) : '–') . '</b>' : '<b style="color:#b45309">data server</b> (' . e($galatSheet && stripos((string)$galatSheet, 'tidak ditemukan') !== false ? 'file sheet bulan ini tidak ada' : (string)$galatSheet) . ')';
+if ($sheetAda && $galatSheet) $lbl .= ' · <b style="color:#dc2626">sheet tidak terbaca, ditampilkan data terakhir</b>';
+if ($tab === 'tahun' && !empty($bulanServer)) $lbl .= ' · bulan tanpa file sheet pakai data server: ' . e(implode(', ', $bulanServer));
+$lbl .= ' · <a href="' . e($url(['segar' => 1, 'akun' => $_GET['akun'] ?? null, 'tahun' => $_GET['tahun'] ?? null])) . '">⟳ Muat ulang</a>';
+?>
+<script>
+document.getElementById('dataSheet').innerHTML = <?= json_encode($lbl, JSON_UNESCAPED_UNICODE) ?>;
+if (/[?&]segar=1/.test(location.search)) history.replaceState(null, '', location.href.replace(/([?&])segar=1&?/, '$1').replace(/[?&]$/, ''));
 </script>
 </body></html>

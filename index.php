@@ -185,9 +185,18 @@ $public = [
                 if (!isset($erp[preg_replace('/^act_/', '', $a['act_id'])])) $bcPesan[] = htmlspecialchars($a['nama']) . ' (' . htmlspecialchars($a['act_id']) . ') — belum ada di ERP Akun Meta, biaya iklannya belum masuk laba';
         } catch (Throwable $ex) { }
     }
+    // [sheet-patokan] akun yang gagal ditarik Meta / gagal ditulis ke tab sheet oleh tarik-meta (angka lama di sheet dipertahankan)
+    $tm = json_decode((string)@file_get_contents('/var/lib/montera-ads/tarik-meta-status.json'), true);
+    foreach (array_merge($tm['gagal_meta'] ?? [], $tm['gagal_sheet'] ?? []) as $a)
+        $bcPesan[] = htmlspecialchars($a['nama']) . ' — GAGAL diisi ke sheet jam ' . date('H:i', strtotime($tm['waktu'])) . ' (' . htmlspecialchars($tm['rentang']) . '), angka lama dipertahankan: ' . htmlspecialchars($a['pesan']);
     if ($bcPesan): ?>
     <div class="brand-warn" role="alert"><b>Cek akun Meta di ERP</b> (menu Akun Meta → Brand), biaya iklan akun ini belum masuk / belum segar di laba:
       <ul><?php foreach ($bcPesan as $p) echo "<li>$p</li>"; ?></ul></div>
+<?php endif; ?>
+<?php /* [validasi-harian] hasil validasi data iklan terakhir (cron 08:00, juga dikirim ke WA Mufti) */
+    $vt = json_decode((string)@file_get_contents('/var/lib/montera-ads/validasi-terakhir.json'), true);
+    if (is_array($vt)): ?>
+    <div class="validasi-terakhir <?= $vt['ok'] ? 'ok' : 'beda' ?>">Validasi terakhir <?= htmlspecialchars(date('d/m H:i', strtotime($vt['waktu']))) ?><?= !empty($vt['uji']) ? ' (uji)' : '' ?>: <b><?= htmlspecialchars(preg_replace('/^\[UJI\] /', '', $vt['ringkas'])) ?></b> · rentang <?= htmlspecialchars($vt['rentang']) ?> · selisih <?= (int)$vt['selisih'] ?>, gagal baca <?= (int)$vt['gagal'] ?></div>
 <?php endif; ?>
 
     <!-- AKUN (nyamping) -->
