@@ -787,6 +787,12 @@ $wkt = $tab === 'tahun' ? $waktuTahun : $dataPer;
 $lbl = $sheetAda ? 'data sheet per <b>' . ($wkt ? date('H:i', (int)$wkt) : '–') . '</b>' : '<b style="color:#b45309">data server</b> (' . e($galatSheet && stripos((string)$galatSheet, 'tidak ditemukan') !== false ? 'file sheet bulan ini tidak ada' : (string)$galatSheet) . ')';
 if ($sheetAda && $galatSheet) $lbl .= ' · <b style="color:#dc2626">sheet tidak terbaca, ditampilkan data terakhir</b>';
 if ($tab === 'tahun' && !empty($bulanServer)) $lbl .= ' · bulan tanpa file sheet pakai data server: ' . e(implode(', ', $bulanServer));
+// [21 Okt] "Meta per HH:MM · Shopee diisi s/d tanggal": Meta = putaran tarik terakhir yang menarik hari ini, Shopee = tanggal terakhir di sheet yang terisi
+$tmS = json_decode((string)@file_get_contents('/var/lib/montera-ads/tarik-meta-status.json'), true) ?: [];
+$shSd = null; foreach (($LS['data'] ?? []) as $t => $o) if ((float)($o['SHOPEE|cost'] ?? 0) || (float)($o['SHOPEE|omset'] ?? 0)) $shSd = max($shSd ?? $t, $t);
+$lbl = 'Meta per <b>' . (!empty($tmS['meta_per']) ? date('H:i', strtotime($tmS['meta_per'])) . (date('Y-m-d', strtotime($tmS['meta_per'])) !== date('Y-m-d') ? ' (' . date('d/m', strtotime($tmS['meta_per'])) . ')' : '') : '–') . '</b>'
+    . (!empty($tmS['meta_per_gagal']) ? ' <b style="color:#dc2626">(' . (int)$tmS['meta_per_gagal'] . ' akun gagal)</b>' : '')
+    . ' · Shopee ' . ucfirst($merk) . ' diisi s/d <b>' . ($shSd ? date('d/m', strtotime($shSd)) : '–') . '</b> · ' . $lbl;
 $lbl .= ' · <a href="' . e($url(['segar' => 1, 'akun' => $_GET['akun'] ?? null, 'tahun' => $_GET['tahun'] ?? null])) . '">⟳ Muat ulang</a>';
 ?>
 <script>
