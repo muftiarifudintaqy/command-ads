@@ -1336,9 +1336,10 @@ function namingGroups(ads, perAcc) {   // naming → iklan-iklannya. perAcc: per
 }
 const produkInvalid = rows => rows.filter(p => !p || String(p).includes(",")).length;   // validasi kolom Produk: 0 kosong, 0 gabungan
 const namaAsli = list => [...list.reduce((m, a) => m.set(a.name, (m.get(a.name) || 0) + adSpend(a)), new Map())].sort((a, b) => b[1] - a[1]).map(x => x[0]).join("  |  ");   // nama iklan asli, spend terbesar dulu
-function namingFix(ents) {
+function namingFix(ents, brand) {
   // sheet "Fix": TANPA akun — naming yang sama dari semua akun dijumlah jadi 1 baris, dikelompokkan per produk
-  const ads = winAds(ents);
+  // [21 Okt] per brand (Fix Prepare / Fix Skinlyfe): naming yang sama di akun Prepare & Skinlyfe tidak lagi digabung (produk beda)
+  const ads = winAds(ents).filter(a => !brand || String(a.acc.brand).toLowerCase() === String(brand).toLowerCase());
   const tops = productTops(namingGroups(ads, true));
   const pOrder = p => { const i = PRODUCTS.findIndex(x => x.label === p); return i < 0 ? 999 : i; };
   const groups = namingGroups(ads, false).map(x => {
@@ -1406,7 +1407,9 @@ function exportData() {
     return accIdx(a.acc) - accIdx(b.acc) || ra - rb || winScore(mOf(b)) - winScore(mOf(a));
   });
   const verdict = e => { const c = clGet(e.id)?.data; return { v: c && V[c.verdict] ? c.verdict : AI.get(e.id).v, why: c?.summary || AI.get(e.id).r[0] }; };
-  const summary = namingSummary(ents), fix = namingFix(ents);
+  const summary = namingSummary(ents);
+  const fixes = [...new Set(winAds(ents).map(a => a.acc.brand))].sort().map(b => ({ brand: b, d: namingFix(ents, b) }));   // [21 Okt] Fix per brand
+  const fix = { produkInvalid: fixes.reduce((t, x) => t + (x.d.produkInvalid || 0), 0) };
   if (summary.produkInvalid || fix.produkInvalid)   // seharusnya selalu 0 (lihat productOfNaming); kalau tidak, jangan diam-diam
     alert(`Peringatan: kolom Produk tidak valid (kosong/gabungan) — sheet Naming ${summary.produkInvalid}, sheet Fix ${fix.produkInvalid}. Tambahkan kata kunci produk di config.php → 'products'.`);
   return {
@@ -1417,7 +1420,7 @@ function exportData() {
     raws: ents.map(mOf), sumCols: [7], countCol: 2, countWord: LVL[S.level][1],
     total: ["", "TOTAL", `${ents.length} ${LVL[S.level][1]}`, "", "", "", "", ents.reduce((t, e) => t + (e.budget || 0), 0) || null, ...mv(sumM(ents.map(mOf))), "", "", ""],
     summary,
-    fix
+    fixes
   };
 }
 function exportFor(accId) {   // hitung ulang khusus 1 akun (atau semua), lalu kembalikan tampilan seperti semula
@@ -1516,7 +1519,7 @@ function collectExport(target) {   // target: ID akun, array ID akun, atau koson
   const name = comboName(accs) || "kosong";
   const out = [{ name: "Data", title: `MONTERA ADS · ${name}`, d }];
   if (d.summary && d.summary.rows.length) out.push({ name: "Naming", title: `MONTERA ADS · ${name} · Naming (winning)`, d: d.summary });
-  if (d.fix && d.fix.rows.length) out.push({ name: "Fix", title: `MONTERA ADS · ${name} · Fix (gabungan semua akun)`, d: d.fix });
+  (d.fixes || []).forEach(f => { if (f.d.rows.length) out.push({ name: `Fix ${f.brand}`, title: `MONTERA ADS · ${name} · Fix ${f.brand} (gabungan semua akun ${f.brand})`, d: f.d }); });   // [21 Okt] Fix per brand
   const viewName = { all: "All ads", ai: "Montera AI", winning: "Winning ads", content: "Winning content", daily: "Rekap harian", check: "Cek data" }[S.view] + (["all", "ai", "winning"].includes(S.view) ? " · " + LVL[S.level][2] + "s" : "");
   const fileTag = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80)}${S.f.prod !== "all" ? "-" + String(S.f.prod).toLowerCase().replace(/[^a-z0-9]+/g, "") : ""}-${S.view === "daily" ? "rekap-harian" : S.view === "all" ? LVL[S.level][1].replace(" ", "") : S.view}-${S.from}_${S.to}`;
   return { sheets: out, tag: name, viewName, fileTag };
