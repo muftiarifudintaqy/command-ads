@@ -1284,7 +1284,7 @@ const winScore = m => m.purch ? m.roas * 10 + Math.log10(m.purch + 1) * 8 + m.ct
 const VRANK = { scale: 0, potential: 1, optimize: 2, watch: 3, kill: 4 };
 // NAMING = nama konten asli. Digabung walau beda versi: B2/B3, SQ_/[SQUARE], Shopee/VATC, "- Copy", (1), dan segmen ID angka diabaikan.
 // "selvia 01" ≠ "selvia 02" (angka konten tetap dibedakan).
-const NAMING_JUNK = /^(copy(\s*\d+)?|\d{5,}|b\d{1,2}|sq|square|\[square\]|\(\d+\)|done\b.*|ori\s*copy.*)$/i;
+const NAMING_JUNK = /^(copy(\s*\d+)?|salin(\s*\d+)?|salinan(\s*\d+)?|\d{5,}|b\d{1,2}|sq|square|\[square\]|\(\d+\)|done\b.*|ori\s*copy.*)$/i;
 function namingOf(n, whole) {   // whole=true → nama IKLAN: seluruh nama (tanpa akhiran sampah); false → nama CAMPAIGN: segmen terakhir
   const segs = String(n || "").split(/\s+-\s+/).map(x => x.trim()).filter(Boolean);
   // buang segmen akhir yang bukan nama konten: Copy, ID angka, B2, (1), done…, dan kode kecil seperti "- nt" (huruf kecil ≤3)
@@ -1293,17 +1293,23 @@ function namingOf(n, whole) {   // whole=true → nama IKLAN: seluruh nama (tanp
   const TAIL_JUNK = /^(tofu|mofu|bofu|shopee|vatc|cpas|catalog(ue)?|ig|fb|reels?|story|stories|feed|sq|square|new|baru|rev(isi)?|test|tes)$/i;
   while (segs.length > 1 && (NAMING_JUNK.test(segs[segs.length - 1]) || TAIL_JUNK.test(segs[segs.length - 1]) || /^[a-z]{1,4}$/.test(segs[segs.length - 1]))) segs.pop();
   let x = (whole ? segs.join(" - ") : segs[segs.length - 1]) || "";
+  // "Salin"/"Salinan" = akhiran duplikat Meta versi Indonesia (sama dengan "Copy")
   for (let k = 0; k < 3; k++) x = x
     .replace(/^sq[_\s-]+/i, "").replace(/\[\s*square\s*\]/ig, "").replace(/\(\s*\d+\s*\)/g, "")
     .replace(/\b(shopee|vatc|catalog(ue)?|cpas)\b/ig, "")
-    .replace(/[\s_-]+copy(\s*\d+)?$/i, "").replace(/[\s_-]+b\d{1,2}$/i, "").replace(/[\s_-]+ori$/i, "")
+    .replace(/[\s_-]+copy(\s*\d+)?$/i, "").replace(/[\s_-]+salin(an)?(\s*\d+)?$/i, "").replace(/[\s_-]+b\d{1,2}$/i, "").replace(/[\s_-]+ori$/i, "")
     .replace(/\s+/g, " ").trim();
   return x || "(tanpa naming)";
 }
 const namingKey = n => namingOf(n).toLowerCase().replace(/[\s_.]+/g, "");
 const badNaming = x => x === "(tanpa naming)" || /^[\d\s]{6,}$/.test(x);
+const kodeSaja = x => /^\d+[A-Z]?$/i.test(x);   // naming iklan cuma nomor/kode pendek ("23", "15B") → tidak bermakna tanpa nama campaign
 function namingOfEnt(e) {   // naming untuk campaign / ad set / iklan
   let x = namingOf(e.name, e.level === "ad");
+  if (e.level === "ad" && kodeSaja(x) && e.camp) {   // "23 - Salin" di campaign "… - ADS 23" → "ADS 23"
+    const y = namingOf(e.camp.name);   // dipakai hanya kalau segmen itu memuat kode ini & bukan daftar ("279A, 274A, 273A" / "275, 276, 278" → tetap "279A")
+    if (!badNaming(y) && !kodeSaja(y) && !y.includes(",") && new RegExp("(^|[^0-9A-Za-z])" + x + "$", "i").test(y)) return y;
+  }
   if (!badNaming(x)) return x;
   if (e.level !== "ad") {   // nama campaign berupa ID → ambil dari nama iklan dengan spend terbesar di dalamnya
     const ads = adsIn(e).slice().sort((a, b) => (AM.get(b.id)?.spend || 0) - (AM.get(a.id)?.spend || 0));
@@ -1329,6 +1335,7 @@ function namingGroups(ads, perAcc) {   // naming → iklan-iklannya. perAcc: per
   return [...g.values()];
 }
 const produkInvalid = rows => rows.filter(p => !p || String(p).includes(",")).length;   // validasi kolom Produk: 0 kosong, 0 gabungan
+const namaAsli = list => [...list.reduce((m, a) => m.set(a.name, (m.get(a.name) || 0) + adSpend(a)), new Map())].sort((a, b) => b[1] - a[1]).map(x => x[0]).join("  |  ");   // nama iklan asli, spend terbesar dulu
 function namingFix(ents) {
   // sheet "Fix": TANPA akun — naming yang sama dari semua akun dijumlah jadi 1 baris, dikelompokkan per produk
   const ads = winAds(ents);
@@ -1344,10 +1351,10 @@ function namingFix(ents) {
   const rk = new Map();   // peringkat dihitung per produk
   return {
     title: `Gabungan semua akun per naming · semua iklan dijumlah (sama dengan Ads Manager) · hanya naming yang ada purchase · ${groups.length} konten · naming sama dari akun berbeda dijumlah jadi 1 · dikelompokkan per produk`,
-    head: ["Peringkat", "Naming", "Produk", "Jumlah akun", "Iklan yang jalan (ada spend)", "Campaign yang jalan", ...MCOLS.map(c => c.t)],
-    kinds: ["int", "txt", "txt", "int", "int", "int", ...MCOLS.map(c => MKIND[c.k])],
-    rows: groups.map(x => [rk.set(x.prod, (rk.get(x.prod) || 0) + 1).get(x.prod), x.label, x.prod, x.accs.length, x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m))]),
-    total: ["", "TOTAL", "", "", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m))))],
+    head: ["Peringkat", "Naming", "Produk", "Jumlah akun", "Iklan yang jalan (ada spend)", "Campaign yang jalan", ...MCOLS.map(c => c.t), "Nama iklan asli"],
+    kinds: ["int", "txt", "txt", "int", "int", "int", ...MCOLS.map(c => MKIND[c.k]), "txt"],
+    rows: groups.map(x => [rk.set(x.prod, (rk.get(x.prod) || 0) + 1).get(x.prod), x.label, x.prod, x.accs.length, x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m)), namaAsli(x.list)]),
+    total: ["", "TOTAL", "", "", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
     dup: groups.map(x => x.accs.length > 1), dupCol: 1,
     raws: groups.map(x => x.m), sumCols: [4, 5], countCol: 1, countWord: "naming",
     produkInvalid: produkInvalid(groups.map(x => x.prod))
@@ -1365,10 +1372,10 @@ function namingSummary(ents) {
   const rk = new Map();   // peringkat dihitung per akun
   return {
     title: `Summary per naming (nama konten iklan) · semua iklan dijumlah (sama dengan Ads Manager) · hanya naming yang ada purchase · ${groups.length} konten · B2/B3/SQ/Shopee/VATC/Copy digabung · sama untuk export Campaigns/Ad sets/Ads`,
-    head: ["Peringkat", "Akun", "Naming", "Produk", "Iklan yang jalan (ada spend)", "Campaign yang jalan", ...MCOLS.map(c => c.t), "Campaign"],
-    kinds: ["int", "txt", "txt", "txt", "int", "int", ...MCOLS.map(c => MKIND[c.k]), "txt"],
-    rows: groups.map(x => [rk.set(x.acc.id, (rk.get(x.acc.id) || 0) + 1).get(x.acc.id), x.acc.name, x.label, x.prod, x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m)), [...new Set(x.list.map(a => a.camp))].map(c => c.name).join("  |  ")]),
-    total: ["", "TOTAL", `${groups.length} naming`, "", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), ""],
+    head: ["Peringkat", "Akun", "Naming", "Produk", "Iklan yang jalan (ada spend)", "Campaign yang jalan", ...MCOLS.map(c => c.t), "Campaign", "Nama iklan asli"],
+    kinds: ["int", "txt", "txt", "txt", "int", "int", ...MCOLS.map(c => MKIND[c.k]), "txt", "txt"],
+    rows: groups.map(x => [rk.set(x.acc.id, (rk.get(x.acc.id) || 0) + 1).get(x.acc.id), x.acc.name, x.label, x.prod, x.run.length, x.camps.length, ...MCOLS.map(c => c.x(x.m)), [...new Set(x.list.map(a => a.camp))].map(c => c.name).join("  |  "), namaAsli(x.list)]),
+    total: ["", "TOTAL", `${groups.length} naming`, "", groups.reduce((t, x) => t + x.run.length, 0), groups.reduce((t, x) => t + x.camps.length, 0), ...MCOLS.map(c => c.x(sumM(groups.map(x => x.m)))), "", ""],
     dup: groups.map(x => x.list.length > 1), dupCol: 2,
     raws: groups.map(x => x.m), sumCols: [4, 5], countCol: 2, countWord: "naming",
     produkInvalid: produkInvalid(groups.map(x => x.prod))
