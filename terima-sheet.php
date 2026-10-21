@@ -31,14 +31,21 @@ if (($in['jenis'] ?? '') === 'akun') {
     if (!$aid) { echo json_encode(['ok' => false, 'pesan' => 'tab belum tersambung ke akun']); exit; }
     $up = $db->prepare("INSERT INTO meta_harian (akun_id, tanggal, spend, omset, purchase, vc, atc, manual) VALUES (?,?,?,?,?,?,?,1)
         ON DUPLICATE KEY UPDATE spend=VALUES(spend), omset=VALUES(omset), purchase=VALUES(purchase), vc=VALUES(vc), atc=VALUES(atc), manual=1");
+    $bulan = [];
     foreach ((array)($in['baris'] ?? []) as $b) {
         $tgl = (string)($b['tanggal'] ?? ''); if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $tgl)) continue;
+        $bulan[substr($tgl, 0, 7)] = 1;
         $v = []; foreach (['spend', 'omset', 'purchase', 'vc', 'atc'] as $k) $v[$k] = ma_angka($b[$k] ?? '');
-        if (!array_filter($v, function ($x) { return $x !== null; })) continue;
+        if (!array_filter($v, function ($x) { return $x !== null; })) {
+            // [segar 21 Okt] baris dikosongkan di sheet (kelima kolom terkirim & kosong) → isian di server ikut dikosongkan, sama seperti kosongkan sel di ads
+            if (count(array_intersect_key($b, $v)) === 5) { $db->prepare("DELETE FROM meta_harian WHERE akun_id = ? AND tanggal = ?")->execute([$aid, $tgl]); $n++; }
+            continue;
+        }
         $bulat = function ($x) { return $x === null ? null : (int)round($x); };
         $up->execute([$aid, $tgl, $bulat($v['spend']), $bulat($v['omset']), $bulat($v['purchase']), $bulat($v['vc']), $bulat($v['atc'])]);
         $n++;
     }
+    if ($bulan) ma_latar('segarkan', ['merek' => $mk, 'gid' => (int)($in['gid'] ?? 0), 'bulan' => array_keys($bulan)]);   // [segar 21 Okt] cache tab + rollup dibaca ulang saat itu juga
     echo json_encode(['ok' => true, 'disimpan' => $n]); exit;
 }
 $ada = $db->prepare("SELECT 1 FROM shopee_harian WHERE merek = ? AND tanggal = ?");
@@ -58,4 +65,7 @@ foreach ((array)($in['baris'] ?? []) as $b) {
     $log->execute([$oleh, $mk, $tgl, 'sheet', null, json_encode(['cost' => $c, 'omset' => $o, 'pesanan' => $p])]);
     $n++;
 }
+$bulan = [];
+foreach ((array)($in['baris'] ?? []) as $b) if (preg_match('/^(\d{4}-\d{2})-\d{2}$/', (string)($b['tanggal'] ?? ''), $m)) $bulan[$m[1]] = 1;
+if ($bulan) ma_latar('segarkan', ['merek' => $mk, 'gid' => 0, 'bulan' => array_keys($bulan)]);   // [segar 21 Okt] edit di tab SHOPEE X CPAS → rollup dibaca ulang
 echo json_encode(['ok' => true, 'disimpan' => $n]);

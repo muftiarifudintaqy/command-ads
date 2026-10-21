@@ -158,10 +158,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 if (isset($_GET['ping'])) {
     header('Content-Type: application/json');
     $mk = ($_GET['merk'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
-    // [sheet-patokan] berubah kalau isi sheet (cache tab SHOPEE X CPAS bulan ini) berubah, ada isian baru, atau daftar akun berubah
+    $pb = preg_match('/^(\d{4})-(\d{2})$/', (string)($_GET['bulan'] ?? ''), $m) ? [(int)$m[1], (int)$m[2]] : [(int)date('Y'), (int)date('n')];
+    // [sheet-patokan] berubah kalau ada isian baru atau daftar akun berubah; [segar 21 Okt] + angka sheet (rollup / tab akun) merek & bulan yang dibuka berubah
     $q = $db->prepare("SELECT CONCAT(IFNULL((SELECT MAX(diubah_at) FROM shopee_harian WHERE merek = ?), ''), '|', (SELECT CONCAT(COUNT(*), '-', IFNULL(SUM(sheet_gid),0), '-', IFNULL(MAX(CHAR_LENGTH(IFNULL(status_tarik,''))),0)) FROM akun))");
-    $q->execute([$mk]); $c = json_decode((string)@file_get_contents('/var/lib/montera-ads/cache/lap_' . $mk . '_' . date('Y') . '_' . date('n') . '.json'), true);
-    echo json_encode(['v' => $q->fetchColumn() . '|' . md5(json_encode($c['data'] ?? null))]); exit;
+    $q->execute([$mk]);
+    echo json_encode(['v' => $q->fetchColumn() . '|' . ma_versi($mk, $pb[0], $pb[1])]); exit;
 }
 /* ===================== DATA ===================== */
 $merk = ($_GET['merk'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
@@ -772,18 +773,47 @@ function tabBaru() {
   };
 }
 // [data-live] perbarui otomatis saat ada isian baru dari sheet / orang lain (tidak saat sedang mengetik)
+// [segar 21 Okt] cek tiap 10 detik (ringan: hanya tanda versi); berubah → angka di halaman diganti tanpa refresh. Susunan tabel berubah (baris/kolom) → muat ulang biasa.
 (function () {
-  var versi = null, sedangIsi = false;
+  var versi = null, sedangIsi = false, jalan = false;
   document.addEventListener('focusin', function (e) { if (e.target.matches('input,select,textarea')) sedangIsi = true; });
   document.addEventListener('focusout', function () { sedangIsi = false; });
   var y = sessionStorage.getItem('dataScroll'); if (y) { window.scrollTo(0, +y); sessionStorage.removeItem('dataScroll'); }
+  function muatPenuh() { sessionStorage.setItem('dataScroll', window.scrollY); location.reload(); }
+  function samakan(a, b) {   // a = elemen di halaman, b = elemen hasil muat baru (susunan sama): ganti teks, nilai isian & warna sel
+    for (var i = 0; i < a.childNodes.length; i++) { var x = a.childNodes[i], z = b.childNodes[i]; if (x.nodeType === 3 && z && z.nodeType === 3 && x.nodeValue !== z.nodeValue) x.nodeValue = z.nodeValue; }
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) {
+      if (a !== document.activeElement && a.type !== 'checkbox' && a.type !== 'hidden' && a.value !== (b.getAttribute('value') || '')) { a.value = b.getAttribute('value') || ''; a.dispatchEvent(new Event('input', { bubbles: true })); }
+    } else if (/^(TD|TH|SPAN|B|SMALL)$/.test(a.tagName) && !a.classList.contains('st')) {
+      ['class', 'title', 'style'].forEach(function (k) { var v = b.getAttribute(k); if (v === null) { if (a.hasAttribute(k)) a.removeAttribute(k); } else if (a.getAttribute(k) !== v) a.setAttribute(k, v); });
+    }
+  }
+  function segarkan() {
+    if (jalan) return; jalan = true;
+    fetch(location.href, { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.text(); }).then(function (t) {
+      jalan = false; if (sedangIsi) { versi = '?'; return; }   // sedang mengetik → coba lagi di cek berikutnya
+      var d = new DOMParser().parseFromString(t, 'text/html'), ok = true, pas = [];
+      var lb = t.match(/getElementById\('dataSheet'\)\.innerHTML = (".*?");\n/), ds = d.getElementById('dataSheet');   // label "Meta per · data sheet per" diisi script
+      if (lb && ds) try { ds.innerHTML = JSON.parse(lb[1]); } catch (e) {}
+      ['.atas', '.isi'].forEach(function (s) {
+        var A = document.querySelector(s), B = d.querySelector(s); if (!A || !B) { ok = false; return; }
+        var ea = A.querySelectorAll('*'), eb = B.querySelectorAll('*');
+        if (ea.length !== eb.length) { ok = false; return; }
+        for (var i = 0; i < ea.length; i++) { if (ea[i].tagName !== eb[i].tagName) { ok = false; return; } if (ea[i].tagName !== 'SCRIPT' && ea[i].tagName !== 'STYLE') pas.push([ea[i], eb[i]]); }
+        pas.push([A, B]);
+      });
+      if (!ok) return muatPenuh();
+      pas.forEach(function (p) { samakan(p[0], p[1]); });
+      window.dispatchEvent(new Event('resize'));
+    }).catch(function () { jalan = false; });
+  }
   setInterval(function () {
     if (document.hidden) return;
-    fetch('data.php?ping=1&merk=' + MERK, { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
+    fetch('data.php?ping=1&merk=' + MERK + '&bulan=<?= e($bln) ?>', { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
       if (versi === null) { versi = j.v; return; }
-      if (j.v !== versi && !sedangIsi) { sessionStorage.setItem('dataScroll', window.scrollY); location.reload(); }
+      if (j.v !== versi && !sedangIsi) { versi = j.v; segarkan(); }
     }).catch(function () {});
-  }, 4000);
+  }, 10000);
 })();
 function kirim(data) { return fetch('data.php', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF': CSRF }, body: JSON.stringify(data) }).then(function (r) { return r.json(); }); }
 document.querySelectorAll('input.inp').forEach(function (el) {
