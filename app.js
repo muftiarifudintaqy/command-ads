@@ -254,14 +254,27 @@ function buildStructure(acc) {
   acc.maps = { mkAd, cMap };
 }
 
+// [spend-terpisah 21 Okt] Meta menjawab spend 0 kalau spend diminta BERSAMA field turunan action (actions, catalog_segment_*, inline_link_clicks).
+// Tiap level jadi 2 permintaan (spend + metrik tayangan | klik + konversi), digabung lagi per tanggal + id (gabungInsight) → 6 permintaan per akun.
 const insightReqs = acc => {
   const base = { time_range: { since: S.from, until: S.to }, action_attribution_windows: CFG.attribution, limit: 500 };
+  const IDS = "ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name";
   return [
-    { path: `${acc.act}/insights`, params: { ...base, level: "ad", time_increment: 1, filtering: AD_FILTER, fields: `ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,inline_link_clicks,frequency,${CONV_FIELDS}` } },
-    { path: `${acc.act}/insights`, params: { ...base, level: "campaign", time_increment: 1, filtering: CAMP_FILTER, fields: `campaign_id,spend,impressions,inline_link_clicks,${CONV_FIELDS}` } },
-    { path: `${acc.act}/insights`, params: { ...base, level: "account", time_increment: 1, fields: `spend,impressions,inline_link_clicks,${CONV_FIELDS}` } }
+    { path: `${acc.act}/insights`, params: { ...base, level: "ad", time_increment: 1, filtering: AD_FILTER, fields: `${IDS},spend,impressions,frequency` } },
+    { path: `${acc.act}/insights`, params: { ...base, level: "ad", time_increment: 1, filtering: AD_FILTER, fields: `${IDS},inline_link_clicks,${CONV_FIELDS}` } },
+    { path: `${acc.act}/insights`, params: { ...base, level: "campaign", time_increment: 1, filtering: CAMP_FILTER, fields: "campaign_id,spend,impressions" } },
+    { path: `${acc.act}/insights`, params: { ...base, level: "campaign", time_increment: 1, filtering: CAMP_FILTER, fields: `campaign_id,inline_link_clicks,${CONV_FIELDS}` } },
+    { path: `${acc.act}/insights`, params: { ...base, level: "account", time_increment: 1, fields: "spend,impressions" } },
+    { path: `${acc.act}/insights`, params: { ...base, level: "account", time_increment: 1, fields: `inline_link_clicks,${CONV_FIELDS}` } }
   ];
 };
+function gabungInsight(sp, kv, id) {   // baris spend + baris konversi → 1 baris per tanggal (+ id)
+  const k = r => r.date_start + "|" + (id ? r[id] : ""), m = new Map();
+  (sp || []).forEach(r => m.set(k(r), { ...r }));
+  (kv || []).forEach(r => { const x = m.get(k(r)); if (x) Object.assign(x, r, { spend: x.spend, impressions: x.impressions, frequency: x.frequency }); else m.set(k(r), { spend: 0, impressions: 0, ...r }); });
+  return [...m.values()];
+}
+const gabung6 = r => [gabungInsight(r[0], r[1], "ad_id"), gabungInsight(r[2], r[3], "campaign_id"), gabungInsight(r[4], r[5], "")];
 const daysBetween = (a, b) => { const out = []; for (let d = new Date(a + "T00:00:00Z"); d <= new Date(b + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1)) out.push(d.toISOString().slice(0, 10)); return out; };
 async function ggetRetry(x, acc, tries = 3) {   // "Service temporarily unavailable" dari Meta → tunggu sebentar lalu ulang
   for (let i = 0; ; i++) { try { return await gget(x.path, x.params, acc); } catch (e) { if (i >= tries - 1) throw e; await sleep(1500 * (i + 1)); } }
@@ -275,8 +288,8 @@ async function getAdInsights(acc, x) {   // akun besar (HK 1, Skinlyfe HK 1): ka
   }
 }
 async function loadInsights(acc) {
-  const [adReq, campReq, accReq] = insightReqs(acc);
-  applyInsights(acc, await Promise.all([getAdInsights(acc, adReq), ggetRetry(campReq, acc), ggetRetry(accReq, acc)]));
+  const q = insightReqs(acc);
+  applyInsights(acc, gabung6(await Promise.all([getAdInsights(acc, q[0]), getAdInsights(acc, q[1]), ggetRetry(q[2], acc), ggetRetry(q[3], acc), ggetRetry(q[4], acc), ggetRetry(q[5], acc)])));
 }
 function applyInsights(acc, [adI, campI, accI]) {
   acc.ads.forEach(a => { a.days = {}; a.freqR = null; });
@@ -385,9 +398,9 @@ async function loadAll(withStructure) {   // withStructure=true (Shift+klik sync
       setLoading(`Sync Meta API… angka ${ok.length} akun sekaligus (${sec()} dtk)`);
       const res = await gmulti(ok.flatMap(a => insightReqs(a).map(r => ({ acc: a.id, ...r }))));
       ok.forEach((a, i) => {
-        const r = res.slice(i * 3, i * 3 + 3);
+        const r = res.slice(i * 6, i * 6 + 6);   // [spend-terpisah] 6 permintaan per akun
         if (r.some(x => !x || x.error)) { failed.add(a); return; }
-        try { applyInsights(a, r.map(unwrap)); a.err = null; a.loaded = true; } catch (e) { failed.add(a); }
+        try { applyInsights(a, gabung6(r.map(unwrap))); a.err = null; a.loaded = true; } catch (e) { failed.add(a); }
       });
     }
   } catch (e) { rest.forEach(a => failed.add(a)); }   // api.php lama / server error → semua lewat jalur cadangan

@@ -122,19 +122,22 @@ function gurl(string $path, array $q, string $tok): string {
 function days_between(string $a, string $b): array { $o = []; for ($d = $a; $d <= $b; $d = date('Y-m-d', strtotime("$d +1 day"))) $o[] = $d; return $o; }
 function level_params(string $level): array {
     global $ATTR;
+    // [spend-terpisah 21 Okt DARURAT] "ad:spend" / "ad:konv": Meta menjawab spend 0 kalau spend diminta BERSAMA field turunan action
+    // (actions, catalog_segment_*, inline_link_clicks) → spend hanya bersama metrik tayangan (impressions, frequency)
+    [$level, $bag] = array_pad(explode(':', $level, 2), 2, '');
     $conv = 'actions,catalog_segment_actions,catalog_segment_value,video_thruplay_watched_actions';
     // TANPA filter spend > 0: Meta melaporkan konversi juga di hari ketika iklan tidak berbelanja
     // (atribusi 7d_click). Filter spend > 0 per hari membuat purchase/value per iklan/campaign
     // lebih rendah s/d 1,5% dari Ads Manager (audit 17 Okt 2026). Meta sendiri tidak mengirim baris kosong.
     $p = ['level' => $level, 'time_increment' => 1, 'action_attribution_windows' => $ATTR];
     if ($level === 'ad') {
-        $p['fields'] = "ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,inline_link_clicks,frequency,$conv";
+        $p['fields'] = "ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name," . ($bag === 'spend' ? 'spend,impressions,frequency' : ($bag === 'konv' ? "inline_link_clicks,$conv" : "spend,impressions,inline_link_clicks,frequency,$conv"));
         $p['filtering'] = [['field' => 'ad.effective_status', 'operator' => 'IN', 'value' => ['ACTIVE', 'PAUSED', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED', 'ARCHIVED', 'PENDING_REVIEW', 'DISAPPROVED', 'PREAPPROVED', 'PENDING_BILLING_INFO', 'IN_PROCESS', 'WITH_ISSUES']]];
     } elseif ($level === 'campaign') {
-        $p['fields'] = "campaign_id,spend,impressions,inline_link_clicks,$conv";
+        $p['fields'] = 'campaign_id,' . ($bag === 'spend' ? 'spend,impressions' : ($bag === 'konv' ? "inline_link_clicks,$conv" : "spend,impressions,inline_link_clicks,$conv"));
         $p['filtering'] = [['field' => 'campaign.effective_status', 'operator' => 'IN', 'value' => ['ACTIVE', 'PAUSED']]];
     } else {
-        $p['fields'] = "spend,impressions,inline_link_clicks,$conv";
+        $p['fields'] = $bag === 'spend' ? 'spend,impressions' : ($bag === 'konv' ? "inline_link_clicks,$conv" : "spend,impressions,inline_link_clicks,$conv");
     }
     return $p;
 }
@@ -240,9 +243,36 @@ function sync_account(array $C, array $acc, string $since, string $until, string
         }
 
         $cara = [];
-        $adI = fetch_level($act, 'ad', $since, $until, $tok, $cara);
-        $campI = fetch_level($act, 'campaign', $since, $until, $tok, $cara);
-        $accI = fetch_level($act, 'account', $since, $until, $tok, $cara);
+        // [spend-terpisah] tiap level: spend & konversi ditarik terpisah lalu digabung per tanggal + id
+        $dua = function (string $lv, string $id) use ($act, $since, $until, $tok, &$cara) {
+            $k = fn($r) => $r['date_start'] . '|' . ($id ? ($r[$id] ?? '') : '');
+            $sp = []; foreach (fetch_level($act, "$lv:spend", $since, $until, $tok, $cara) as $r) $sp[$k($r)] = $r;
+            $kv = []; foreach (fetch_level($act, "$lv:konv", $since, $until, $tok, $cara) as $r) $kv[$k($r)] = $r;
+            $o = [];
+            foreach (array_keys($sp + $kv) as $x) {
+                $r = $sp[$x] ?? ($kv[$x] + ['spend' => 0, 'impressions' => 0, 'frequency' => 0]);
+                foreach (['inline_link_clicks', 'actions', 'catalog_segment_actions', 'catalog_segment_value', 'video_thruplay_watched_actions'] as $f) if (isset($kv[$x][$f])) $r[$f] = $kv[$x][$f]; else unset($r[$f]);
+                $o[] = $r;
+            }
+            return $o;
+        };
+        $adI = $dua('ad', 'ad_id');
+        $campI = $dua('campaign', 'campaign_id');
+        $accI = $dua('account', '');
+        // [spend-0 21 Okt] Meta kadang menjawab spend 0 (impresi juga 0) untuk SATU level padahal konversinya ada & level lain berbelanja
+        // (Selow GCR 0114 level iklan 18–20 Okt tersimpan 0). Hari dengan baris iklan tapi total spend iklan 0 sementara akun > 0 (atau sebaliknya)
+        // → level itu ditarik ulang maks 2x; tetap begitu = gagal, data lama tidak diganti.
+        $perHari = function (array $rows) { $o = []; foreach ($rows as $r) $o[$r['date_start']] = ($o[$r['date_start']] ?? 0) + (float) ($r['spend'] ?? 0); return $o; };
+        for ($coba = 1; ; $coba++) {
+            $sA = $perHari($adI); $sK = $perHari($accI); $ulang = [];
+            foreach ($sA as $t => $v) { if ($v == 0 && ($sK[$t] ?? 0) > 0) $ulang['ad'] = $t; if ($v > 0 && isset($sK[$t]) && $sK[$t] == 0) $ulang['account'] = $t; }
+            if (!$ulang) break;
+            if ($coba > 2) throw new MetaErr('temp', 'Meta menjawab spend 0 di level ' . implode('/', array_keys($ulang)) . ' (' . implode(', ', $ulang) . ') padahal level lain berbelanja — data lama dipertahankan');
+            say("  $acc[name]: spend 0 di level " . implode('/', array_keys($ulang)) . ' (' . implode(', ', $ulang) . "), tarik ulang $coba");
+            sleep(5);
+            if (isset($ulang['ad'])) $adI = $dua('ad', 'ad_id');
+            if (isset($ulang['account'])) $accI = $dua('account', '');
+        }
 
         // tanpa filter spend, Meta juga mengirim baris harian yang SEMUA metriknya 0 (iklan sudah berhenti) → dilewati
         $kosong = fn(array $m) => !array_filter($m, fn($v) => (float) $v != 0);
