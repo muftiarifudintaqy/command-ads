@@ -190,13 +190,14 @@ if ($sheetAda) {
     }
 } else {
     $q = $db->prepare("SELECT m.tanggal, SUM(m.spend) s, SUM(m.omset) o, SUM(m.purchase) p, SUM(m.atc) a FROM meta_harian m JOIN akun k ON k.id = m.akun_id
-        WHERE k.merek = ? AND m.tanggal BETWEEN ? AND ? GROUP BY m.tanggal"); $q->execute([$merk, $awal, $akhir]);
+        WHERE k.merek = ? AND m.tanggal BETWEEN ? AND ? AND m.tanggal < CURDATE() GROUP BY m.tanggal"); $q->execute([$merk, $awal, $akhir]);   // [h1-sheet 22 Okt] s/d kemarin
     $ME = []; foreach ($q->fetchAll() as $r) $ME[$r['tanggal']] = $r;
 }
 
 $HARI = []; $TOT = ['sc' => 0, 'so' => 0, 'sp' => 0, 'mc' => 0, 'mo' => 0, 'mp' => 0, 'ma' => 0, 'ca' => 0, 'n' => 0];
 for ($d = 1; $d <= $jml; $d++) {
     $t = sprintf('%04d-%02d-%02d', $th, $bl, $d); $s = $SH[$t] ?? []; $m = $ME[$t] ?? [];
+    if ($t >= date('Y-m-d')) $s = $m = [];   // [h1-sheet 22 Okt] laporan = data s/d KEMARIN; baris hari ini & depan kosong
     $r = ['t' => $t, 'sc' => (float)($s['cost'] ?? 0), 'so' => (float)($s['omset'] ?? 0), 'sp' => (float)($s['pesanan'] ?? 0), 'sr' => (isset($s['roas']) && $s['roas'] !== null) ? (float)$s['roas'] : null,
           'mc' => (float)($m['s'] ?? 0), 'mo' => (float)($m['o'] ?? 0), 'mp' => (float)($m['p'] ?? 0), 'ma' => (float)($m['a'] ?? 0)];
     $r['ca'] = $r['sc'] + $r['mc']; $r['isi'] = ($r['sc'] || $r['so'] || $r['mc']);
@@ -386,9 +387,9 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
   $thn = (int)($_GET['tahun'] ?? date('Y')); if ($thn < 2020 || $thn > (int)date('Y')) $thn = (int)date('Y');
   $ambilTahun = function ($y) use ($db, $merk) {
     $o = []; for ($i = 1; $i <= 12; $i++) $o[$i] = ['sc' => 0, 'so' => 0, 'sp' => 0, 'mc' => 0, 'mo' => 0, 'mp' => 0];
-    $q = $db->prepare("SELECT MONTH(tanggal) b, SUM(cost) sc, SUM(omset) so, SUM(pesanan) sp FROM shopee_harian WHERE merek = ? AND YEAR(tanggal) = ? GROUP BY b"); $q->execute([$merk, $y]);
+    $q = $db->prepare("SELECT MONTH(tanggal) b, SUM(cost) sc, SUM(omset) so, SUM(pesanan) sp FROM shopee_harian WHERE merek = ? AND YEAR(tanggal) = ? AND tanggal < CURDATE() GROUP BY b"); $q->execute([$merk, $y]);
     foreach ($q->fetchAll() as $r) { $o[(int)$r['b']]['sc'] = (float)$r['sc']; $o[(int)$r['b']]['so'] = (float)$r['so']; $o[(int)$r['b']]['sp'] = (float)$r['sp']; }
-    $q = $db->prepare("SELECT MONTH(m.tanggal) b, SUM(m.spend) mc, SUM(m.omset) mo, SUM(m.purchase) mp FROM meta_harian m JOIN akun k ON k.id = m.akun_id WHERE k.merek = ? AND YEAR(m.tanggal) = ? GROUP BY b"); $q->execute([$merk, $y]);
+    $q = $db->prepare("SELECT MONTH(m.tanggal) b, SUM(m.spend) mc, SUM(m.omset) mo, SUM(m.purchase) mp FROM meta_harian m JOIN akun k ON k.id = m.akun_id WHERE k.merek = ? AND YEAR(m.tanggal) = ? AND m.tanggal < CURDATE() GROUP BY b"); $q->execute([$merk, $y]);   // [h1-sheet 22 Okt]
     foreach ($q->fetchAll() as $r) { $o[(int)$r['b']]['mc'] = (float)$r['mc']; $o[(int)$r['b']]['mo'] = (float)$r['mo']; $o[(int)$r['b']]['mp'] = (float)$r['mp']; }
     // [sheet-patokan] bulan yang punya file sheet: angka = jumlah harian tab SHOPEE X CPAS; bulan tanpa file sheet tetap angka server
     global $segar, $bulanServer, $waktuTahun;
@@ -485,9 +486,9 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
     // [sheet-patokan] isi tabel akun = tab akun ini di sheet (cache maks 5 menit); akun tanpa tab: data server
     $DHm = []; $TB = !empty($ak['sheet_gid']) ? ma_tab_banyak([$ak + ['id' => $akunId]], $th, $bl, $segar)[$akunId] : null;
     if ($TB && is_array($TB['data'])) { $dataPer = $TB['waktu'] ? (int)$TB['waktu'] : null; $galatSheet = $TB['galat'];
-      foreach ($TB['data'] as $tg => $x) if (array_filter($x, function ($v) { return $v !== null; })) $DHm[$tg] = $x; }
+      foreach ($TB['data'] as $tg => $x) if ($tg < date('Y-m-d') && array_filter($x, function ($v) { return $v !== null; })) $DHm[$tg] = $x; }
     else { $sheetAda = false; $galatSheet = $TB['galat'] ?? 'akun belum punya tab di sheet';
-      $q = $db->prepare("SELECT * FROM meta_harian WHERE akun_id = ? AND tanggal BETWEEN ? AND ?"); $q->execute([$akunId, $awal, $akhir]);
+      $q = $db->prepare("SELECT * FROM meta_harian WHERE akun_id = ? AND tanggal BETWEEN ? AND ? AND tanggal < CURDATE()"); $q->execute([$akunId, $awal, $akhir]);   // [h1-sheet 22 Okt]
       foreach ($q->fetchAll() as $x) $DHm[$x['tanggal']] = $x; }
     $tt = ['spend' => 0, 'omset' => 0, 'purchase' => 0, 'vc' => 0, 'atc' => 0]; $akhirIsi = null;
     foreach ($DHm as $tg => $x) { foreach ($tt as $k => $_) $tt[$k] += (float)$x[$k]; if ((float)$x['spend'] > 0 && ($akhirIsi === null || $tg > $akhirIsi)) $akhirIsi = $tg; }
@@ -873,7 +874,8 @@ if ($tab === 'tahun' && !empty($bulanServer)) $lbl .= ' · bulan tanpa file shee
 // [21 Okt] "Meta per HH:MM · Shopee diisi s/d tanggal": Meta = putaran tarik terakhir yang menarik hari ini, Shopee = tanggal terakhir di sheet yang terisi
 $tmS = json_decode((string)@file_get_contents('/var/lib/montera-ads/tarik-meta-status.json'), true) ?: [];
 $shSd = null; foreach (($LS['data'] ?? []) as $t => $o) if ((float)($o['SHOPEE|cost'] ?? 0) || (float)($o['SHOPEE|omset'] ?? 0)) $shSd = max($shSd ?? $t, $t);
-$lbl = 'Meta per <b>' . (!empty($tmS['meta_per']) ? date('H:i', strtotime($tmS['meta_per'])) . (date('Y-m-d', strtotime($tmS['meta_per'])) !== date('Y-m-d') ? ' (' . date('d/m', strtotime($tmS['meta_per'])) . ')' : '') : '–') . '</b>'
+// [h1-sheet 22 Okt] data iklan = s/d KEMARIN di semua tempat: "Data iklan s/d dd/mm (ditarik HH:MM)"
+$lbl = 'Data iklan s/d <b>' . date('d/m', strtotime('-1 day')) . '</b>' . (!empty($tmS['meta_per']) ? ' (Meta ditarik ' . date('H:i', strtotime($tmS['meta_per'])) . (date('Y-m-d', strtotime($tmS['meta_per'])) !== date('Y-m-d') ? ' ' . date('d/m', strtotime($tmS['meta_per'])) : '') . ')' : '')
     . (!empty($tmS['meta_per_gagal']) ? ' <b style="color:#dc2626">(' . (int)$tmS['meta_per_gagal'] . ' akun gagal)</b>' : '')
     . ' · Shopee ' . ucfirst($merk) . ' diisi s/d <b>' . ($shSd ? date('d/m', strtotime($shSd)) : '–') . '</b> · ' . $lbl;
 $lbl .= ' · <a href="' . e($url(['segar' => 1, 'akun' => $_GET['akun'] ?? null, 'tahun' => $_GET['tahun'] ?? null])) . '">⟳ Muat ulang</a>';

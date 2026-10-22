@@ -744,7 +744,7 @@ function renderHeader() {
     ? `Data terakhir diperbarui ${when(S.localAt)}${S.refreshing ? " · memperbarui di background…" : S.busy ? " · memuat…" : ""}`
     : S.lastSync ? `${S.fromCache ? "Data tersimpan" : "Updated"} ${hhmm(S.lastSync)}${S.syncSec != null && !S.fromCache ? ` (${S.syncSec} dtk)` : ""}${S.busy ? " · memperbarui…" : S.to === TODAY ? ` · auto ${CFG.autoRefreshMinutes} mnt` : ""}` : "Menghubungkan…";
   $("#dpLabel").textContent = periodLabel();
-  $("#periodRange").textContent = rangeText();
+  $("#periodRange").textContent = rangeText() + (S.to >= TODAY ? " · Hari ini (sementara, belum masuk laporan)" : "");   // [h1-sheet 22 Okt] laporan resmi = s/d kemarin
   const kills = ADS.filter(a => isOn(a) && pfOk(a.acc) && AI.get(a.id)?.v === "kill").length;
   $("#railBadge").textContent = kills; $("#railBadge").hidden = !kills;
 }
@@ -1575,6 +1575,12 @@ async function doExport(target, btn, mode) {   // mode: "xlsx" (default) atau "g
   }
   if (btn) { btn.classList.add("busy"); if (btn.id === "btnExport" || btn.id === "btnSheets") btn.textContent = mode === "gsheet" ? "Membuat Google Sheet…" : "Menyiapkan Excel…"; }
   try {
+    // [h1-sheet 22 Okt] export laporan (Data/Naming/Fix) = data iklan s/d KEMARIN; rentang yang memuat hari ini dipotong ke kemarin
+    if (S.to >= TODAY) {
+      const kmr = addDays(TODAY, -1), dari = S.from < TODAY ? S.from : kmr;
+      if (!confirm(`Export laporan hanya memuat data iklan s/d kemarin.\nRentang diganti jadi ${fmtD(dari)} – ${fmtD(kmr)}. Lanjut?`)) throw new Error("Export dibatalkan.");
+      await setRange(dari, kmr, dari === kmr ? "yesterday" : "custom");
+    }
     const { sheets, tag, viewName, fileTag } = collectExport(target);
     if (mode === "gsheet") {
       const payload = { title: `Montera Ads · ${tag} · ${viewName} · ${rangeText()}`, sheets: sheets.map(({ name, d }) => ({
