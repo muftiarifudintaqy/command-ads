@@ -270,7 +270,7 @@ table.lap td{padding-left:9px!important;padding-right:9px!important}
 table.lap thead tr:first-child>*:nth-child(3),table.lap thead tr:first-child>*:nth-child(4),
 table.lap thead tr:last-child>*:nth-child(8),table.lap thead tr:last-child>*:nth-child(14),
 table.lap tbody tr>*:nth-child(8),table.lap tbody tr>*:nth-child(14),
-table.lap tfoot tr>*:nth-child(8),table.lap tfoot tr>*:nth-child(14){border-left:10px solid #3b82f6!important}
+table.lap tfoot tr>*:nth-child(8),table.lap tfoot tr>*:nth-child(14){border-left:10px solid var(--w)!important}
 table.lap td,table.lap2 td{padding-top:4px!important;padding-bottom:4px!important}
 table.lap2 input,table.lap2 .sel{padding-top:3px!important;padding-bottom:3px!important;min-height:0!important}
 table.lap2 th{white-space:normal!important;max-width:118px;line-height:1.25;vertical-align:bottom}
@@ -885,3 +885,21 @@ document.getElementById('dataSheet').innerHTML = <?= json_encode($lbl, JSON_UNES
 if (/[?&]segar=1/.test(location.search)) history.replaceState(null, '', location.href.replace(/([?&])segar=1&?/, '$1').replace(/[?&]$/, ''));
 </script>
 </body></html>
+<style>
+tr.baris-kosong, tr.baris-kosong td, tr.baris-kosong td *{opacity:1!important;filter:none!important;color:#334155!important}
+tr.baris-kosong td:first-child{color:#0f172a!important;font-weight:600!important}
+.kosong{color:#334155!important}
+</style>
+<style>
+.tabel table{border-collapse:collapse!important}
+.tabel td,.tabel th{font-size:14px!important;text-rendering:geometricPrecision;-webkit-font-smoothing:subpixel-antialiased;-moz-osx-font-smoothing:auto}
+.tabel td{color:#0f172a!important;font-weight:500!important;border:1px solid #e2e8f0!important;padding:7px 10px!important}
+.tabel td:first-child{font-weight:700!important}
+.tabel tfoot td{font-weight:800!important}
+</style>
+<style>
+.tabel td{font-size:17px!important;font-weight:600!important;padding:8px 10px!important}
+.tabel th{font-size:15px!important;font-weight:700!important}
+.tabel thead tr:first-child th{font-size:16px!important}
+.tabel tfoot td{font-size:17px!important;font-weight:800!important}
+</style>
