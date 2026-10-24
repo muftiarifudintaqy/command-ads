@@ -234,7 +234,7 @@ function sync_account(array $C, array $acc, string $since, string $until, string
                     'info' => graph('GET', gurl($act, ['fields' => 'name,currency'], $tok)),
                     'camps' => get_all(gurl("$act/campaigns", ['fields' => 'id,name,status,effective_status,daily_budget,lifetime_budget,start_time', 'effective_status' => $live, 'limit' => 500], $tok)),
                     'sets' => get_all(gurl("$act/adsets", ['fields' => 'id,name,campaign_id,status,daily_budget,lifetime_budget,start_time,promoted_object', 'effective_status' => $live, 'limit' => 500], $tok)),
-                    'ads' => get_all(gurl("$act/ads", ['fields' => 'id,name,status,effective_status,adset_id,campaign_id,created_time,creative{body,title,thumbnail_url}', 'effective_status' => ['ACTIVE', 'PENDING_REVIEW', 'DISAPPROVED', 'WITH_ISSUES', 'IN_PROCESS', 'PREAPPROVED'], 'limit' => 200], $tok)),
+                    'ads' => get_all(gurl("$act/ads", ['fields' => 'id,name,status,effective_status,adset_id,campaign_id,created_time,creative{body,title,thumbnail_url}', 'effective_status' => ['ACTIVE', 'PENDING_REVIEW', 'DISAPPROVED', 'WITH_ISSUES', 'IN_PROCESS', 'PREAPPROVED'], 'limit' => 50], $tok)),   // [24 Okt] 200 → 50: dengan creative{body} Meta sering menjawab "Please reduce the amount of data" (PREPARE CPAS HK 1, SKINLYFE HK-1)
                 ];
                 foreach ($raw['ads'] as &$o) { if (isset($o['creative']['body'])) $o['creative']['body'] = mb_substr($o['creative']['body'], 0, 400); } unset($o);
                 unset($raw['info']['id']);
