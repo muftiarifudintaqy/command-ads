@@ -166,7 +166,21 @@ if (isset($_GET['ping'])) {
 }
 /* ===================== DATA ===================== */
 $merk = ($_GET['merk'] ?? '') === 'skinlyfe' ? 'skinlyfe' : 'prepare';
-$tab = in_array($_GET['tab'] ?? '', ['laporan', 'tahun', 'input', 'akun'], true) ? $_GET['tab'] : 'laporan';
+$tab = in_array($_GET['tab'] ?? '', ['laporan', 'tahun', 'input', 'akun', 'arsip'], true) ? $_GET['tab'] : 'laporan';
+/** [satu-file 28 Okt] link Google Sheet per bulan (file utama = bulan berjalan, arsip = bulan lalu, file bulanan lama) dari Apps Script
+    doGet jenis=daftar_file — tidak ada link yang ditulis manual. Cache 10 menit; skrip lama (belum mendukung) → tombol tidak tampil. */
+function daftar_file_sheet(string $merk, bool $segar = false): array {
+    $f = "/var/lib/montera-ads/cache/daftar_file_{$merk}.json";
+    if (!$segar && is_file($f) && time() - filemtime($f) < 600 && is_array($j = json_decode((string)file_get_contents($f), true))) return $j;
+    $e = ma_env('/etc/montera-laporan.env');
+    $ch = curl_init(($e['LAPORAN_URL'] ?? '') . '?' . http_build_query(['key' => $e['LAPORAN_KEY'] ?? '', 'jenis' => 'daftar_file', 'merk' => $merk]));
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 30]);
+    $j = json_decode((string)curl_exec($ch), true); curl_close($ch);
+    $out = ['didukung' => is_array($j) && isset($j['daftar']) && is_array($j['daftar']), 'daftar' => [], 'waktu' => time()];
+    if ($out['didukung']) foreach ($j['daftar'] as $x) if (preg_match('/^\d{4}-\d{2}$/', (string)($x['bulan'] ?? '')) && preg_match('#^https://docs\.google\.com/#', (string)($x['url'] ?? ''))) $out['daftar'][] = $x;
+    @file_put_contents($f, json_encode($out));
+    return $out;
+}
 $bln = preg_match('/^\d{4}-\d{2}$/', (string)($_GET['bulan'] ?? '')) ? (string)$_GET['bulan'] : date('Y-m');
 [$th, $bl] = array_map('intval', explode('-', $bln));
 $awal = sprintf('%04d-%02d-01', $th, $bl); $jml = (int)date('t', strtotime($awal)); $akhir = sprintf('%04d-%02d-%02d', $th, $bl, $jml);
@@ -301,12 +315,17 @@ table.lap tfoot td{color:#000;font-weight:800}
 table.lap .rw{font-weight:800}
 .kartu .k .b{color:#000;font-weight:900;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
 .kartu .k .s{color:#1f2937;font-weight:600}
+.sheet-link{display:inline-flex;gap:6px;align-items:center;margin-left:8px}.sheet-link .btn{padding:6px 12px;font-size:13px}
+table.arsip-sheet td{text-align:left;white-space:normal}table.arsip-sheet td:last-child{white-space:nowrap}
 </style></head><body>
 <div class="atas">
   <a class="kembali" href="index.php">← Dashboard</a><h1>Data Ads</h1>
   <div class="tg"><a href="<?= e('?' . http_build_query(['merk' => 'prepare', 'tab' => $tab, 'bulan' => $bln])) ?>" class="<?= $merk === 'prepare' ? 'on' : '' ?>">Prepare</a><a href="<?= e('?' . http_build_query(['merk' => 'skinlyfe', 'tab' => $tab, 'bulan' => $bln])) ?>" class="<?= $merk === 'skinlyfe' ? 'on' : '' ?>">Skinlyfe</a></div>
-  <div class="tab"><a href="<?= e($url(['tab' => 'laporan'])) ?>" class="<?= $tab === 'laporan' ? 'on' : '' ?>">Laporan</a><a href="<?= e($url(['tab' => 'tahun'])) ?>" class="<?= $tab === 'tahun' ? 'on' : '' ?>">Tahunan</a><a href="<?= e($url(['tab' => 'input'])) ?>" class="<?= $tab === 'input' ? 'on' : '' ?>">Input Shopee</a><a href="<?= e($url(['tab' => 'akun', 'akun' => null])) ?>" class="<?= $tab === 'akun' ? 'on' : '' ?>">Akun CPAS</a></div>
+  <div class="tab"><a href="<?= e($url(['tab' => 'laporan'])) ?>" class="<?= $tab === 'laporan' ? 'on' : '' ?>">Laporan</a><a href="<?= e($url(['tab' => 'tahun'])) ?>" class="<?= $tab === 'tahun' ? 'on' : '' ?>">Tahunan</a><a href="<?= e($url(['tab' => 'input'])) ?>" class="<?= $tab === 'input' ? 'on' : '' ?>">Input Shopee</a><a href="<?= e($url(['tab' => 'akun', 'akun' => null])) ?>" class="<?= $tab === 'akun' ? 'on' : '' ?>">Akun CPAS</a><a href="<?= e($url(['tab' => 'arsip'])) ?>" class="<?= $tab === 'arsip' ? 'on' : '' ?>">Arsip Laporan</a></div>
   <form method="get"><input type="hidden" name="merk" value="<?= e($merk) ?>"><input type="hidden" name="tab" value="<?= e($tab) ?>"><input type="month" name="bulan" value="<?= e($bln) ?>" onchange="this.form.submit()"></form>
+  <?php $DF = daftar_file_sheet($merk, isset($_GET['segar'])); $LNK = null; foreach ($DF['daftar'] as $x) if ($x['bulan'] === $bln) $LNK = $x; ?>
+  <?php if ($LNK): ?><span class="sheet-link"><a class="btn" href="<?= e($LNK['url']) ?>" target="_blank" rel="noopener" title="<?= e($LNK['nama']) ?>">Buka Google Sheet</a><button class="btn abu" type="button" data-salin="<?= e($LNK['url']) ?>">Salin link</button></span>
+  <?php elseif ($DF['didukung']): ?><span class="sheet-link ket" style="margin:0">Sheet bulan ini belum ada</span><?php endif; ?>
   <span class="kanan">Masuk sebagai <b><?= e($user) ?></b> · <a href="laporan.php?merk=<?= e($merk) ?>&bulan=<?= e($bln) ?>">versi sheet</a></span>
   <span class="kanan" id="dataSheet" style="margin-left:10px"></span>
 </div>
@@ -443,6 +462,16 @@ table.lap .rw{font-weight:800}
     </tr><?php endfor; ?></tbody>
     <tfoot><tr><td>Total <?= e($per) ?></td><td><?= rp($tY['sc']) ?></td><td><?= rp($tY['so']) ?></td><td><?= an($tY['sp']) ?></td><td><?= rs(bagi($tY['so'], $tY['sc'])) ?></td><td><?= rp($tY['mc']) ?></td><td><?= rp($tY['mo']) ?></td><td><?= rs(bagi($tY['mo'], $tY['mc'])) ?></td><td><?= rp($tY['sc'] + $tY['mc']) ?></td><td><?= rs($romi($tY)) ?></td><td><?= rp($tP['so']) ?></td><td><?= $dlt($tY['so'], $tP['so']) ?></td></tr></tfoot>
   </table></div>
+
+<?php elseif ($tab === 'arsip'): $DF = daftar_file_sheet($merk, isset($_GET['segar'])); $JN = ['utama' => 'File utama (bulan berjalan)', 'arsip' => 'Arsip', 'lama' => 'File bulanan']; ?>
+  <div class="ket">Semua Google Sheet laporan <b><?= e(ucfirst($merk)) ?></b>, terbaru di atas. Link diambil otomatis dari Google Drive (diperbarui tiap 10 menit, <a href="<?= e($url(['tab' => 'arsip', 'segar' => 1])) ?>">muat ulang sekarang</a>).</div>
+  <?php if (!$DF['didukung']): ?><div class="ket">Daftar belum tersedia: kode Apps Script versi satu file belum dipasang.</div>
+  <?php else: ?><div class="tabel"><table class="arsip-sheet"><thead><tr><th>Bulan</th><th>Jenis</th><th>Nama file</th><th></th></tr></thead><tbody>
+    <?php foreach ($DF['daftar'] as $x): [$y, $m] = array_map('intval', explode('-', $x['bulan'])); ?>
+    <tr><td><?= e($NB[$m] . ' ' . $y) ?></td><td><?= e($JN[$x['jenis']] ?? $x['jenis']) ?></td><td><?= e($x['nama']) ?></td>
+      <td><a class="btn" href="<?= e($x['url']) ?>" target="_blank" rel="noopener">Buka</a> <button class="btn abu" type="button" data-salin="<?= e($x['url']) ?>">Salin link</button></td></tr>
+    <?php endforeach; if (!$DF['daftar']): ?><tr><td colspan="4">Belum ada file.</td></tr><?php endif; ?>
+  </tbody></table></div><?php endif; ?>
 
 <?php elseif ($tab === 'input'): ?>
   <div class="ket">Isi <b>Cost, Omset, Pesanan</b> dari Seller Center di kotak putih. Presentase Shopee Ads, CPR, dan ROAS dihitung otomatis seperti di sheet. Tersimpan otomatis dan ikut ke sheet.</div>
@@ -760,6 +789,12 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,.tabel::-webkit-scrollbar,.lemba
   }
   window.tanya = buka;
   window.kabar = function (pesan, judul) { return buka({ judul: judul || 'Selesai', pesan: pesan, batal: false, ikon: '💬' }); };
+  // [satu-file 28 Okt] tombol "Salin link" Google Sheet
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-salin]'); if (!b) return;
+    var u = b.getAttribute('data-salin');
+    (navigator.clipboard ? navigator.clipboard.writeText(u) : Promise.reject()).then(function () { kabar('Link Google Sheet sudah disalin.', 'Tersalin'); }, function () { kabar(u, 'Salin link ini'); });
+  });
 })();
 </script>
 <script>
