@@ -380,8 +380,7 @@ table.lap .rw{font-weight:800}
     <thead><tr><th></th><th colspan="6">SHOPEE</th><th colspan="6">CPAS META</th><th colspan="3">Daily All Platform</th></tr>
     <tr><th>Tanggal</th><th>Cost</th><th>Presentase Shopee Ads</th><th>Omset</th><th>Pesanan</th><th>CPR</th><th>ROAS</th><th>Cost</th><th>Omset</th><th>Purchases with shared items</th><th>CPR</th><th>ROAS</th><th>Adds to cart with shared items</th><th>Daily Cost All</th><th>Daily CPR All</th><th>Daily Roas All / ROMI</th></tr></thead>
     <?php $romiW = function ($v) { if ($v === null) return '–'; $k = $v < 2.5 ? 'rw-m' : ($v < 3 ? 'rw-h' : 'rw-b'); return '<span class="rw ' . $k . '">' . rs($v) . '</span>'; }; ?>
-    <?php $akhirIsi = $isi ? $isi[count($isi) - 1]['t'] : ''; // [jelas 28 Okt] tanggal setelah hari terakhir terisi tidak ditampilkan ?>
-    <tbody><?php foreach ($HARI as $r): if ($r['t'] > $akhirIsi) continue; $sh = ($r['sc'] || $r['so']); $mt = (bool)$r['mc']; $lewat = $r['t'] <= date('Y-m-d');
+    <tbody><?php foreach ($HARI as $r): $sh = ($r['sc'] || $r['so']); $mt = (bool)$r['mc']; $lewat = $r['t'] <= date('Y-m-d');
       $kos = function ($ok, $v) { return $ok ? $v : '<span class="kosong">—</span>'; }; ?>
     <tr class="<?= !$sh && !$mt ? 'baris-kosong' : '' ?>">
       <td><?= e($label($r['t'])) ?><?= ($mt && !$sh && $lewat) ? ' <span class="lenc-w">Shopee belum diisi</span>' : '' ?></td>
