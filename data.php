@@ -291,6 +291,16 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
 @keyframes muncul{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .lembar{background:rgba(255,255,255,.88)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
 .alat{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:2px 2px 12px}.alat-kanan{display:flex;gap:8px}
+/* [jelas 28 Okt] tabel laporan lebih jelas untuk screenshot WA — susunan, kolom & warna TIDAK diubah */
+table.lap td{font-size:13.5px!important;font-weight:600;color:#111;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-variant-numeric:tabular-nums;border-bottom:1px solid #d3d9e1}
+table.lap td .kosong{color:#cbd5e1;font-weight:400}
+table.lap thead th,table.lap thead tr:first-child th,table.lap thead tr:nth-child(2) th,table.lap thead th:first-child{color:#fff!important;font-weight:700;-webkit-font-smoothing:antialiased}
+table.lap tbody tr:nth-child(even) td{background:#f6f7f9}
+table.lap tbody tr:hover td{background:#eef2f7}
+table.lap tfoot td{color:#000;font-weight:800}
+table.lap .rw{font-weight:800}
+.kartu .k .b{color:#000;font-weight:900;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+.kartu .k .s{color:#1f2937;font-weight:600}
 </style></head><body>
 <div class="atas">
   <a class="kembali" href="index.php">← Dashboard</a><h1>Data Ads</h1>
@@ -370,7 +380,8 @@ input:focus,select:focus{outline:none;border-color:var(--w)!important;box-shadow
     <thead><tr><th></th><th colspan="6">SHOPEE</th><th colspan="6">CPAS META</th><th colspan="3">Daily All Platform</th></tr>
     <tr><th>Tanggal</th><th>Cost</th><th>Presentase Shopee Ads</th><th>Omset</th><th>Pesanan</th><th>CPR</th><th>ROAS</th><th>Cost</th><th>Omset</th><th>Purchases with shared items</th><th>CPR</th><th>ROAS</th><th>Adds to cart with shared items</th><th>Daily Cost All</th><th>Daily CPR All</th><th>Daily Roas All / ROMI</th></tr></thead>
     <?php $romiW = function ($v) { if ($v === null) return '–'; $k = $v < 2.5 ? 'rw-m' : ($v < 3 ? 'rw-h' : 'rw-b'); return '<span class="rw ' . $k . '">' . rs($v) . '</span>'; }; ?>
-    <tbody><?php foreach ($HARI as $r): $sh = ($r['sc'] || $r['so']); $mt = (bool)$r['mc']; $lewat = $r['t'] <= date('Y-m-d');
+    <?php $akhirIsi = $isi ? $isi[count($isi) - 1]['t'] : ''; // [jelas 28 Okt] tanggal setelah hari terakhir terisi tidak ditampilkan ?>
+    <tbody><?php foreach ($HARI as $r): if ($r['t'] > $akhirIsi) continue; $sh = ($r['sc'] || $r['so']); $mt = (bool)$r['mc']; $lewat = $r['t'] <= date('Y-m-d');
       $kos = function ($ok, $v) { return $ok ? $v : '<span class="kosong">—</span>'; }; ?>
     <tr class="<?= !$sh && !$mt ? 'baris-kosong' : '' ?>">
       <td><?= e($label($r['t'])) ?><?= ($mt && !$sh && $lewat) ? ' <span class="lenc-w">Shopee belum diisi</span>' : '' ?></td>
