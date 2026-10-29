@@ -52,9 +52,10 @@ let RANGE = [TODAY];
 const ACCOUNTS = CFG.accounts.map(a => ({
   id: a.id.replace(/^act_/, ""), act: a.id.startsWith("act_") ? a.id : "act_" + a.id, name: a.name, pf: a.group, tokenKey: a.token,
   prodDefault: a.product || "",   // produk default akun (config.php → 'product'), dipakai kalau nama iklan tidak mengandung kode produk
-  brand: a.brand || (a.token.charAt(0).toUpperCase() + a.token.slice(1)),   // brand = dari token (prepare/skinlyfe), bisa ditimpa 'brand' di config
+  // [30 Okt] brand dari config 'brand' (Prepare/Skinlyfe); token portfolio (glowingCantik, glowyGlow, marketBeauty, selowSkinlyfe) BUKAN brand
+  brand: a.brand || (a.token.charAt(0).toUpperCase() + a.token.slice(1)),
   currency: "IDR", campaigns: [], ads: [], days: {}, daysAll: {}, daysCamp: {}, err: null, loaded: false, maps: null, raw: null, structAt: 0,
-  spendSrc: (CFG.spendSource || { prepare: "account", skinlyfe: "campaign" })[a.token] || "account"
+  spendSrc: (CFG.spendSource || { prepare: "account", skinlyfe: "campaign" })[String(a.brand || a.token).toLowerCase()] || "account"
 }));
 let CAMPAIGNS = [], ADSETS = [], ADS = [], BY_ID = new Map();
 // PRODUK: ditentukan otomatis dari link Shopee iklan, lalu kode di nama campaign/ad set/iklan (mis. "- LS -", "- LF -").

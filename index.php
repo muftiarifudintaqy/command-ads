@@ -122,7 +122,7 @@ $public = [
     'funnels' => $C['funnels'],
     'products' => $C['products'] ?? [],
     'productSets' => $C['product_sets'] ?? [],   // product set CPAS → produk (langkah 3 kolom Produk export)
-    'accounts' => array_map(fn($a) => ['name' => $a['name'], 'id' => $a['id'], 'group' => $a['group'], 'token' => $a['token'], 'product' => $a['product'] ?? ''], $C['accounts']),
+    'accounts' => array_map(fn($a) => ['name' => $a['name'], 'id' => $a['id'], 'group' => $a['group'], 'token' => $a['token'], 'brand' => $a['brand'] ?? '', 'product' => $a['product'] ?? ''], $C['accounts']),   // [30 Okt] brand eksplisit (token portfolio bukan brand)
     'ai' => ['provider' => $C['ai']['provider']],
     'loginEnabled' => $loginOn,
 ];
