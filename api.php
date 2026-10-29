@@ -101,11 +101,15 @@ if ($action === 'multi') {
         $queue[] = [$i, "https://graph.facebook.com/{$C['graph_version']}/$path?" . http_build_query($q)];
     }
     $mh = curl_multi_init();
-    $active = [];
-    $MAX = 20;   // jumlah koneksi paralel ke Meta
-    while ($queue || $active) {
+    $active = []; $urlOf = []; $coba = []; $tunda = [];
+    // [29 Okt] antre pelan: maks 4 koneksi paralel (dulu 20) + limit Meta (4/17/32/613/80000+) ditunggu & diulang maks 3x
+    // (jeda 3/6/12 dtk, total tunggu maks ±40 dtk). Request yang tetap gagal hanya menandai dirinya sendiri; akun lain tetap jalan.
+    $MAX = 4; $batasWaktu = time() + 40;
+    while ($queue || $active || $tunda) {
+        foreach ($tunda as $k => [$siap, $item]) if ($siap <= microtime(true)) { $queue[] = $item; unset($tunda[$k]); }
         while ($queue && count($active) < $MAX) {
             [$i, $url] = array_shift($queue);
+            $urlOf[$i] = $url;
             $ch = curl_init($url);
             curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 90, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_ENCODING => '', CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4]);
             curl_multi_add_handle($mh, $ch);
@@ -121,7 +125,13 @@ if ($action === 'multi') {
             curl_multi_remove_handle($mh, $ch);
                     $j = $err ? null : json_decode((string)$txt, true);
             if (!is_array($j)) { $results[$i] = ['error' => ['message' => $err ?: 'Respon Meta tidak valid']]; continue; }
-            if (isset($j['error'])) { $results[$i] = ['error' => $j['error']]; continue; }
+            if (isset($j['error'])) {
+                $kode = (int) ($j['error']['code'] ?? 0);
+                $limit = in_array($kode, [4, 17, 32, 613], true) || ($kode >= 80000 && $kode <= 80014);
+                if ($limit && ($coba[$i] ?? 0) < 3 && time() < $batasWaktu) { $coba[$i] = ($coba[$i] ?? 0) + 1;
+                    $tunda[] = [microtime(true) + 3 * (2 ** ($coba[$i] - 1)), [$i, $urlOf[$i]]]; continue; }
+                $results[$i] = ['error' => $j['error']]; continue;
+            }
             if (isset($j['data']) && is_array($j['data'])) {
                 foreach ($j['data'] as $row) $data[$i][] = $row;
                 if (!empty($j['paging']['next']) && count($data[$i]) < 60000) { $queue[] = [$i, $j['paging']['next']]; continue; }   // halaman berikutnya
@@ -130,7 +140,7 @@ if ($action === 'multi') {
                 $results[$i] = ['obj' => $j];
             }
         }
-        if ($active) curl_multi_select($mh, 0.5);
+        if ($active) curl_multi_select($mh, 0.5); elseif ($tunda && !$queue) usleep(200000);
     }
     curl_multi_close($mh);
     out(['results' => $results]);

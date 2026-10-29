@@ -347,10 +347,19 @@ function hydrateCache() {
 
 async function pool(items, n, fn) { const q = [...items]; await Promise.all(Array.from({ length: n }, async () => { while (q.length) await fn(q.shift()); })); }
 
-async function gmulti(reqs) {   // server (api.php) menjalankan semua request ke Meta secara paralel + ambil semua halaman
-  const j = await api("multi", { requests: reqs });
-  if (j.error || !Array.isArray(j.results)) throw new Error(j.error?.message || "multi gagal");
-  return j.results;
+async function gmulti(reqs) {   // server (api.php) menjalankan request ke Meta + ambil semua halaman
+  // [29 Okt] dikirim bertahap, maks 24 request (≈ 4 akun) per panggilan & berurutan, supaya tidak menembak semua akun sekaligus
+  // (limit Meta code 17). Potongan yang gagal hanya menandai request-nya sendiri sebagai error → akun di potongan lain tetap tampil.
+  const out = [], POT = 24;
+  for (let i = 0; i < reqs.length; i += POT) {
+    const pot = reqs.slice(i, i + POT);
+    try {
+      const j = await api("multi", { requests: pot });
+      if (j.error || !Array.isArray(j.results)) throw new Error(j.error?.message || "multi gagal");
+      out.push(...j.results);
+    } catch (e) { pot.forEach(() => out.push({ error: { message: e.message } })); }
+  }
+  return out;
 }
 const unwrap = x => x.data ?? x.obj;
 // ---------- DATA LOKAL: tabel montera_ads.ins_* diisi cron /opt/montera-ads/sync-insights.php (hari ini tiap 10 mnt, 3 hari tiap 30 mnt) ----------
@@ -410,7 +419,7 @@ async function loadAll(withStructure) {   // withStructure=true (Shift+klik sync
     let done = 0;
     rebuild(); S.lastSync ||= new Date(); render();
     setLoading(`Mengulang ${failed.size} akun yang besar/gagal… (${sec()} dtk)`);
-    await pool([...failed], 4, async acc => {
+    await pool([...failed], 2, async acc => {   // [29 Okt] jalur cadangan 2 akun sekaligus (dulu 4) supaya limit Meta tidak terpicu
       try {
         if (stale(acc) || !acc.raw) await loadStructure(acc); else if (!acc.maps) buildStructure(acc);
         await loadInsights(acc); acc.err = null; acc.loaded = true;
