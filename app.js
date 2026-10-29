@@ -372,6 +372,15 @@ function localRows(L, x) {   // baris ringkas api.php?action=local → bentuk ap
   ];
 }
 const parseDT = s => s ? new Date(s.replace(" ", "T")) : null;
+// [akses-kuning 29 Okt] kegagalan tarik dibedakan: "akses" (#200/10/294/190, token) → badge kuning "akses perlu dicek";
+// selain itu (limit 17, code 100, timeout, server) = "sementara" → dicoba ulang otomatis, tidak ditampilkan sebagai gagal.
+const jenisGagal = (msg, acc) => /#\s?(10|200|294)\b|code (10|200|294|190)\b|\(#(10|200|294)\)|ads_read|ads_management|permission|grant|token|session has expired|OAuth|190/i.test(String(msg))
+  || ["no_access", "invalid"].includes(acc?.localStatus?.token_status) ? "akses" : "sementara";
+function tandaiGagal(acc, msg) {   // data lama (tersimpan / tarikan sebelumnya) TIDAK dihapus
+  const j = jenisGagal(msg, acc);
+  acc.warn = { jenis: j, pesan: String(msg || "").slice(0, 200) };
+  acc.err = acc.loaded ? null : (j === "akses" ? "akses perlu dicek" : "belum termuat, dicoba ulang otomatis");
+}
 const TOKEN_MSG = { invalid: "Token invalid (code 190) — ganti token di /etc/montera-ads-meta.json", no_access: "Token tidak punya akses ke akun ini — assign System User di Business Manager" };
 async function loadLocal() {   // akun yang SEMUA tanggalnya sudah tersimpan → langsung dari tabel lokal
   const done = new Set();
@@ -382,11 +391,39 @@ async function loadLocal() {   // akun yang SEMUA tanggalnya sudah tersimpan →
     if (!x.covered) return;
     a.raw = x.raw || { info: { currency: "IDR" }, camps: [], sets: [], ads: [] }; a.structAt = Date.now(); buildStructure(a);
     applyInsights(a, localRows(L, x)); a.err = null; a.loaded = true; done.add(a);
+    a.warn = ["no_access", "invalid"].includes(x.status?.token_status) ? { jenis: "akses", pesan: TOKEN_MSG[x.status.token_status] } : null;
   });
   return done;
 }
+// [status-akun 29 Okt] kotak status di atas dari cek pagi 06:00 (Meta = tersimpan = sheet = ERP) + status token terkini
+async function muatStatusAkun() {
+  try {
+    const j = await api("status_akun", {}); const el = $("#statusAkun"); if (!el || !j || j.error) return;
+    const tgl = j.valid_sd ? new Date(j.valid_sd + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short" }) : "—";
+    const ok = j.ok === j.total;
+    el.className = "status-akun " + (ok ? "ok" : "cek");
+    el.textContent = `Valid s/d ${tgl} · ${j.ok}/${j.total} akun OK`;
+    el.title = (j.cek_pagi ? `Cek pagi ${j.cek_pagi}: Meta = data tersimpan = sheet = ERP` : "Cek pagi belum jalan") + (j.catatan?.length ? "\n" + j.catatan.join("\n") : "");
+  } catch (e) { /* kotak status tidak boleh mengganggu halaman */ }
+}
+let ulangKe = 0, ulangTimer = null;
+function jadwalUlang() {   // [akses-kuning 29 Okt] akun "sementara" dicoba ulang diam-diam tiap 60 dtk, maks 3x per muat
+  clearTimeout(ulangTimer);
+  const sisa = ACCOUNTS.filter(a => a.warn?.jenis === "sementara");
+  if (!sisa.length || ulangKe >= 3) return;
+  ulangTimer = setTimeout(async () => {
+    if (S.busy) { jadwalUlang(); return; }
+    ulangKe++;
+    await pool(sisa, 2, async acc => {
+      try { if (!acc.raw) await loadStructure(acc); else if (!acc.maps) buildStructure(acc); await loadInsights(acc); acc.err = null; acc.warn = null; acc.loaded = true; }
+      catch (e) { tandaiGagal(acc, e.message); }
+    });
+    rebuild(); render(); jadwalUlang();
+  }, 60000);
+}
 async function loadAll(withStructure) {   // withStructure=true (Shift+klik sync) = paksa live Meta untuk semua akun
   if (S.busy) return;
+  ulangKe = 0;
   S.busy = true;
   const t0 = Date.now(), sec = () => Math.round((Date.now() - t0) / 1000);
   const failed = new Set();
@@ -422,14 +459,14 @@ async function loadAll(withStructure) {   // withStructure=true (Shift+klik sync
     await pool([...failed], 2, async acc => {   // [29 Okt] jalur cadangan 2 akun sekaligus (dulu 4) supaya limit Meta tidak terpicu
       try {
         if (stale(acc) || !acc.raw) await loadStructure(acc); else if (!acc.maps) buildStructure(acc);
-        await loadInsights(acc); acc.err = null; acc.loaded = true;
-      } catch (e) { acc.err = TOKEN_MSG[acc.localStatus?.token_status] || e.message; }
+        await loadInsights(acc); acc.err = null; acc.warn = null; acc.loaded = true;
+      } catch (e) { tandaiGagal(acc, TOKEN_MSG[acc.localStatus?.token_status] || e.message); }
       setLoading(`Mengulang akun… ${++done}/${failed.size} (${sec()} dtk)`);
     });
   }
   rebuild();
   S.lastSync = new Date(); S.busy = false; S.fromCache = false; S.syncSec = sec();
-  setLoading(""); render(); saveCache();
+  setLoading(""); render(); saveCache(); jadwalUlang(); muatStatusAkun();
 }
 
 async function setStatusLive(e, on) {
@@ -743,10 +780,10 @@ function renderHeader() {
   const acc = ACCOUNTS.find(a => a.id === S.acc);
   if (!acc && S.multi.size) { $("#scopeLabel").innerHTML = `${LOGO}<b>${S.multi.size} akun dipilih</b><span class="muted">${ACCOUNTS.filter(x => S.multi.has(x.id)).map(x => esc(x.name)).join(", ")}</span>`; }
   else $("#scopeLabel").innerHTML = acc ? `${LOGO}<b>${esc(acc.name)}</b><span class="muted">ID ${acc.id}</span>` : `${LOGO}<b>Semua akun</b><span class="muted">${ACCOUNTS.filter(pfOk).length} ad accounts${S.brand !== "all" ? " · " + esc(S.brand) : ""}${S.pf !== "all" ? " · " + esc(S.pf) : ""}</span>`;
-  const errs = ACCOUNTS.filter(a => a.err);
+  const errs = ACCOUNTS.filter(a => a.warn?.jenis === "akses");   // [akses-kuning 29 Okt] hanya akses yang perlu dicek; sementara dicoba ulang diam-diam
   $("#srcBadge").className = "src " + (errs.length ? "warn" : "live");
   const src = S.local ? (S.local === ACCOUNTS.length ? "DATA LOKAL" : `LOKAL ${S.local}/${ACCOUNTS.length}`) : "LIVE";
-  $("#srcBadge").innerHTML = `<span class="flame">🔥</span><b>${src}</b>${errs.length ? ` · ${errs.length} akun gagal sync` : S.local ? " · sinkron Meta" : " · Meta API"}`;
+  $("#srcBadge").innerHTML = `<span class="flame">🔥</span><b>${src}</b>${errs.length ? ` · ${errs.length} akun akses perlu dicek` : S.local ? " · sinkron Meta" : " · Meta API"}`;
   $("#srcBadge").title = "Klik untuk lihat log sync per akun";
   const when = d => d.toDateString() === new Date().toDateString() ? hhmm(d) : `${d.toLocaleDateString("id-ID", { day: "numeric", month: "short" })} ${hhmm(d)}`;
   $("#updated").textContent = S.localAt
@@ -758,13 +795,14 @@ function renderHeader() {
   $("#railBadge").textContent = kills; $("#railBadge").hidden = !kills;
 }
 
-function accCard(sum, sub, m, extra, sel, attr, live, err) {
+function accCard(sum, sub, m, extra, sel, attr, live, err, warn) {
   const id = sum ? "" : (attr.match(/data-acc="([^"]*)"/) || [])[1];
   const picked = id && S.multi.has(id);
   const pick = sum || err ? "" : `<span class="acc-pick ${picked ? "on" : ""}" role="checkbox" aria-checked="${picked}" tabindex="0" data-pick="${id}" title="Centang untuk menggabungkan beberapa akun">${picked ? "✓" : ""}</span>`;
-  return `<button class="acc ${sel || picked ? "sel" : ""} ${err ? "errc" : ""}" ${attr}>
+  const badge = warn?.jenis === "akses" ? `<span class="acc-warn" title="${esc(warn.pesan || "")}">⚠ akses perlu dicek</span>` : "";
+  return `<button class="acc ${sel || picked ? "sel" : ""} ${err || badge ? "warnc" : ""}" ${attr}>
     <div class="acc-h">${pick}${sum ? `<span class="plogo all">Σ</span>` : LOGO}<div><b>${esc(sub[0])}</b><small>${esc(sub[1])}</small></div>${live != null ? `<i class="ddot ${live ? "on" : "off"}" title="${live} iklan aktif"></i>` : ""}</div>
-    ${err ? `<p class="acc-err">Gagal sync: ${esc(err)}</p>` : `<div class="acc-m">
+    ${badge}${err ? `<p class="acc-wp">${esc(err)}${warn?.pesan ? `<br><small>${esc(warn.pesan)}</small>` : ""}</p>` : `<div class="acc-m">
       <div><small>Amount spent</small><b>${rp(m.spend)}</b></div>
       <div><small>Conversion value</small><b>${rp(m.value)}</b></div>
       <div><small>Purchase ROAS</small><b class="${!m.spend ? "" : m.roas >= TARGET.roas ? "good" : "bad"}">${m.purch ? f2(m.roas) : "—"}</b></div>
@@ -799,7 +837,7 @@ function renderAccounts() {
       const ads = a.ads.filter(qOk), live = ads.filter(isOn).length;
       const s = ads.filter(x => AI.get(x.id)?.v === "scale").length, k = ads.filter(x => isOn(x) && AI.get(x.id)?.v === "kill").length;
       const extra = qInfo(ads) + (s ? `<span class="vb v-scale">▲ ${s}</span>` : "") + (k ? `<span class="vb v-kill">■ ${k} matikan</span>` : "") + (!S.q && !s && !k ? `<span class="muted">${live} iklan aktif</span>` : "");
-      return accCard(false, [a.name, `ID: ${a.id}`], a.err ? null : accMetrics(a), a.err ? "" : extra, S.acc === a.id, `data-acc="${a.id}"`, a.err ? null : live, a.err);
+      return accCard(false, [a.name, `ID: ${a.id}`], a.err ? null : accMetrics(a), a.err ? "" : extra, S.acc === a.id, `data-acc="${a.id}"`, a.err ? null : live, a.err, a.warn);
     }).join("") + `</div></div>`;
   });
   $("#accStrip").innerHTML = accs.length ? html : `<p class="muted pad">${S.busy && !S.lastSync ? "Mengambil data akun…" : `Tidak ada akun yang cocok${S.q ? ` dengan "${esc(S.q)}"` : ""}.`}</p>`;
@@ -989,7 +1027,7 @@ function renderCheck() {   // bandingkan 3 sumber spend dari Meta API supaya bis
   $("#thead").innerHTML = `<tr><th class="c-chk"></th><th class="c-tog"></th><th class="c-name">Akun</th><th class="num">Spend level akun<small>semua campaign, termasuk yg dihapus</small></th><th class="num">Spend campaign Active+Paused</th><th class="num">Spend jumlah per iklan</th><th class="num">Selisih akun vs campaign</th><th>Dipakai dashboard</th><th class="num">Purchases (akun)</th><th class="num">Conversion value (akun)</th></tr>`;
   let T = [0, 0, 0, 0, 0];
   $("#tbody").innerHTML = accs.map(a => {
-    if (a.err) return `<tr class="norow"><td class="c-chk"></td><td class="c-tog"></td><td class="c-name"><b>${esc(a.name)}</b></td><td colspan="7" class="err">Gagal sync: ${esc(a.err)}</td></tr>`;
+    if (a.err) return `<tr class="norow"><td class="c-chk"></td><td class="c-tog"></td><td class="c-name"><b>${esc(a.name)}</b></td><td colspan="7" class="warnt">⚠ ${esc(a.err)}</td></tr>`;   // [akses-kuning 29 Okt]
     const s1 = sumD(a.daysAll), s2 = sumD(a.daysCamp), s3 = a.ads.reduce((t, x) => t + sumD(x.days), 0), m = daysM(a.days);
     T[0] += s1; T[1] += s2; T[2] += s3; T[3] += m.purch; T[4] += m.value;
     const diff = s1 - s2;

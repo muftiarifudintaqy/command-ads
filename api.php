@@ -58,9 +58,38 @@ function http_req(string $method, string $url, ?string $body = null, array $head
 function acc_token(array $C, string $accId): ?string {
     $accId = preg_replace('/^act_/', '', $accId);
     foreach ($C['accounts'] as $a) {
-        if (preg_replace('/^act_/', '', $a['id']) === $accId) return $C['tokens'][$a['token']] ?? null;
+        if (preg_replace('/^act_/', '', $a['id']) !== $accId) continue;
+        $tokCfg = $C['tokens'][$a['token']] ?? null;
+        // [peta-token 29 Okt] token yang BENAR-BENAR punya akses (peta /me/adaccounts tiap token, /var/lib/montera-ads/peta-token.json,
+        // disegarkan cek pagi 06:00 & penarik). Token config yang tidak punya akses tidak dipakai → tidak ada lagi #200 karena token salah.
+        $peta = json_decode((string) @file_get_contents('/var/lib/montera-ads/peta-token.json'), true);
+        $boleh = $peta['akun'][$accId] ?? [];
+        if ($boleh) {
+            $etc = json_decode((string) @file_get_contents('/etc/montera-ads-meta.json'), true) ?: [];
+            foreach ($boleh as $k) if (!empty($etc[$k]) && $etc[$k] === $tokCfg) return $tokCfg;   // token config memang punya akses
+            foreach ($boleh as $k) if (!empty($etc[$k])) return $etc[$k];                         // token portfolio yang punya akses
+        }
+        return $tokCfg;
     }
     return null;
+}
+
+/* ---------- [status-akun 29 Okt] kotak "Valid s/d [tgl] · N/N akun OK" ---------- */
+if ($action === 'status_akun') {
+    $cek = json_decode((string) @file_get_contents('/var/lib/montera-ads/cek-akun-pagi.json'), true) ?: [];
+    $ids = array_map(fn($a) => preg_replace('/^act_/', '', $a['id']), $C['accounts']); $nama = array_combine($ids, array_column($C['accounts'], 'name'));
+    $tok = [];
+    try { $pdo = ac_pdo(); $ph = implode(',', array_fill(0, count($ids), '?'));
+        $q = $pdo->prepare("SELECT act_id, token_status FROM ins_status WHERE act_id IN ($ph)"); $q->execute($ids); foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) $tok[$r['act_id']] = $r['token_status']; } catch (Throwable $e) {}
+    $ok = 0; $catatan = [];
+    foreach ($ids as $id) {
+        $p = $cek['akun'][$id] ?? null; $t = $tok[$id] ?? 'ok';
+        if (in_array($t, ['no_access', 'invalid'], true)) { $catatan[] = "{$nama[$id]}: akses perlu dicek (" . ($t === 'invalid' ? 'token invalid' : 'tidak ada akses') . ')'; continue; }
+        if ($p && $p['status'] === 'akses') { $catatan[] = "{$nama[$id]}: {$p['catatan']}"; continue; }
+        if ($p && $p['status'] === 'selisih') { $catatan[] = "{$nama[$id]}: selisih setelah tarik ulang — {$p['catatan']}"; continue; }
+        $ok++;
+    }
+    out(['valid_sd' => $cek['valid_sd'] ?? null, 'cek_pagi' => isset($cek['waktu']) ? date('d/m H:i', strtotime($cek['waktu'])) : null, 'ok' => $ok, 'total' => count($ids), 'catatan' => $catatan]);
 }
 
 /* ---------- 1. GET ke Meta Graph API ---------- */

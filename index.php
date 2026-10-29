@@ -161,6 +161,7 @@ $public = [
       <h1 class="brand-title"><img src="assets/montera-ads.png" alt="Montera Ads" width="83" height="50"></h1>
       <div class="scope" id="scopeLabel"></div>
       <button class="src" id="srcBadge"></button>
+      <span class="status-akun" id="statusAkun" title="Status data akun iklan"></span>
       <div class="head-right">
         <span class="muted" id="updated"></span>
         <button class="icon-btn" id="syncBtn" title="Sync ulang"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></svg></button>
