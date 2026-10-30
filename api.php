@@ -92,6 +92,16 @@ if ($action === 'status_akun') {
     out(['valid_sd' => $cek['valid_sd'] ?? null, 'cek_pagi' => isset($cek['waktu']) ? date('d/m H:i', strtotime($cek['waktu'])) : null, 'ok' => $ok, 'total' => count($ids), 'catatan' => $catatan]);
 }
 
+/* ---------- [validasi-total 30 Okt] kotak "Status Data": hasil Validasi Harian Total (ERP & ads), rincian hanya untuk Iklan ---------- */
+if ($action === 'status_total') {
+    $v = json_decode((string) @file_get_contents('/var/lib/montera-status/validasi-total.json'), true) ?: [];
+    $b = [];
+    foreach (['order', 'resi', 'omzet', 'dana', 'iklan', 'laba', 'stok', 'absensi'] as $k) { $x = $v['bagian'][$k] ?? null; if (!$x) continue;
+        $b[$k] = ['nama' => $x['nama'], 'status' => $x['status'], 'teks' => $x['teks'], 'valid_sd' => $x['valid_sd'] ?? null, 'selisih' => (int) ($x['selisih'] ?? 0),
+                  'rincian' => $k === 'iklan' ? array_slice($x['rincian'] ?? [], 0, 15) : [], 'catatan' => $k === 'iklan' ? array_values(array_filter($x['catatan'] ?? [])) : []]; }
+    out(['dibuat' => $v['dibuat'] ?? null, 'bagian' => $b]);
+}
+
 /* ---------- 1. GET ke Meta Graph API ---------- */
 if ($action === 'graph') {
     $tok  = acc_token($C, (string)($in['acc'] ?? ''));

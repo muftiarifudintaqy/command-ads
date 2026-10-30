@@ -137,7 +137,8 @@ function level_params(string $level): array {
         $p['fields'] = 'campaign_id,' . ($bag === 'spend' ? 'spend,impressions' : ($bag === 'konv' ? "inline_link_clicks,$conv" : "spend,impressions,inline_link_clicks,$conv"));
         $p['filtering'] = [['field' => 'campaign.effective_status', 'operator' => 'IN', 'value' => ['ACTIVE', 'PAUSED']]];
     } else {
-        $p['fields'] = $bag === 'spend' ? 'spend,impressions' : ($bag === 'konv' ? "inline_link_clicks,$conv" : "spend,impressions,inline_link_clicks,$conv");
+        // [aturan-sheet 30 Okt] level akun juga action_values: purchase/omset pixel dipakai kalau katalog 0 (sama dengan sheet, lihat metrics_akun)
+        $p['fields'] = $bag === 'spend' ? 'spend,impressions' : ($bag === 'konv' ? "inline_link_clicks,$conv,action_values" : "spend,impressions,inline_link_clicks,$conv,action_values");
     }
     return $p;
 }
@@ -193,6 +194,20 @@ function metrics(array $r): array {
         'v3s' => (int) act_val($r['actions'] ?? [], ['video_view']),
         'thru' => (int) act_val($r['video_thruplay_watched_actions'] ?? [], ['video_view']),
     ];
+}
+/** [aturan-sheet 30 Okt, keputusan Mufti] Total akun = aturan script sheet (lib.php ma_konversi): purchase & omset katalog CPAS,
+ *  kalau katalog 0 → pixel (actions/action_values), kecuali akun "cpas_only" (Prepare). Skinlyfe: katalog ?: pixel.
+ *  Hanya level akun; level iklan/campaign tetap katalog (dipakai analisis naming). */
+function metrics_akun(array $r, array $aturan): array {
+    $m = metrics($r); $sk = ($aturan['metode'] ?? '') === 'skinlyfe'; $cpas = !$sk && !empty($aturan['cpas_only']);
+    if (!$cpas) {
+        $jP = $sk ? ['purchase', 'omni_purchase', 'onsite_conversion.purchase'] : ['omni_purchase', 'onsite_conversion.purchase', 'purchase'];
+        if (!$m['purch']) $m['purch'] = (int) act_val($r['actions'] ?? [], $jP);
+        if (!$m['value']) $m['value'] = act_val($r['action_values'] ?? [], $jP);
+        if (!$m['atc']) $m['atc'] = (int) act_val($r['actions'] ?? [], ['omni_add_to_cart', 'add_to_cart']);
+        if (!$m['vc']) $m['vc'] = (int) act_val($r['actions'] ?? [], $sk ? ['view_content', 'omni_view_content'] : ['omni_view_content', 'view_content']);
+    }
+    return $m;
 }
 function insert_rows(PDO $db, string $table, array $cols, array $rows): void {
     foreach (array_chunk($rows, 400) as $chunk) {
@@ -251,7 +266,7 @@ function sync_account(array $C, array $acc, string $since, string $until, string
             $o = [];
             foreach (array_keys($sp + $kv) as $x) {
                 $r = $sp[$x] ?? ($kv[$x] + ['spend' => 0, 'impressions' => 0, 'frequency' => 0]);
-                foreach (['inline_link_clicks', 'actions', 'catalog_segment_actions', 'catalog_segment_value', 'video_thruplay_watched_actions'] as $f) if (isset($kv[$x][$f])) $r[$f] = $kv[$x][$f]; else unset($r[$f]);
+                foreach (['inline_link_clicks', 'actions', 'action_values', 'catalog_segment_actions', 'catalog_segment_value', 'video_thruplay_watched_actions'] as $f) if (isset($kv[$x][$f])) $r[$f] = $kv[$x][$f]; else unset($r[$f]);
                 $o[] = $r;
             }
             return $o;
@@ -281,7 +296,8 @@ function sync_account(array $C, array $acc, string $since, string $until, string
             'campaign_id' => (string) ($r['campaign_id'] ?? ''), 'campaign_name' => mb_substr((string) ($r['campaign_name'] ?? ''), 0, 500)]
             + metrics($r) + ['freq' => (float) ($r['frequency'] ?? 0)]; }
         $campRows = []; foreach ($campI as $r) { if ($kosong(metrics($r))) continue; $campRows[] = ['act_id' => $id, 'tanggal' => $r['date_start'], 'campaign_id' => $r['campaign_id']] + metrics($r); }
-        $accRows = []; foreach ($accI as $r) $accRows[] = ['act_id' => $id, 'tanggal' => $r['date_start']] + metrics($r);
+        $q = $db->prepare("SELECT metode, cpas_only FROM akun WHERE act_id = ? LIMIT 1"); $q->execute(['act_' . $id]); $aturan = $q->fetch() ?: [];   // [aturan-sheet 30 Okt]
+        $accRows = []; foreach ($accI as $r) $accRows[] = ['act_id' => $id, 'tanggal' => $r['date_start']] + metrics_akun($r, $aturan);
 
         $db->beginTransaction();
         foreach (['ins_ad' => $adRows, 'ins_campaign' => $campRows, 'ins_account' => $accRows] as $tb => $rows) {

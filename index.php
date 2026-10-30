@@ -162,6 +162,7 @@ $public = [
       <div class="scope" id="scopeLabel"></div>
       <button class="src" id="srcBadge"></button>
       <span class="status-akun" id="statusAkun" title="Status data akun iklan"></span>
+      <span class="status-total" id="statusTotal" title="Validasi harian total: ERP & ads.skinlyfe.id = sumber asli"></span>
       <div class="head-right">
         <span class="muted" id="updated"></span>
         <button class="icon-btn" id="syncBtn" title="Sync ulang"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></svg></button>

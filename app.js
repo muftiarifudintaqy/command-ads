@@ -407,6 +407,22 @@ async function muatStatusAkun() {
     el.title = (j.cek_pagi ? `Cek pagi ${j.cek_pagi}: Meta = data tersimpan = sheet = ERP` : "Cek pagi belum jalan") + (j.catatan?.length ? "\n" + j.catatan.join("\n") : "");
   } catch (e) { /* kotak status tidak boleh mengganggu halaman */ }
 }
+// [validasi-total 30 Okt] kotak "Status Data": 8 bagian ✅/⚠️/❌ (ERP & ads = sumber asli); klik = rincian (detail baris hanya Iklan)
+async function muatStatusTotal() {
+  try {
+    const j = await api("status_total", {}); const el = $("#statusTotal"); if (!el || !j || j.error || !j.bagian) return;
+    const ik = { ok: "✅", warn: "⚠️", err: "❌" }, B = Object.values(j.bagian);
+    const tg = d => d ? new Date(d + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short" }) : "belum valid";
+    el.className = "status-total " + (B.some(b => b.status === "err") ? "err" : B.some(b => b.status === "warn") ? "cek" : "ok");
+    el.innerHTML = `<button type="button" class="st-tombol">Status Data ${B.map(b => ik[b.status]).join("")}</button><div class="st-panel" hidden>
+      <div class="st-judul">Validasi harian total · dicek ${j.dibuat ? new Date(j.dibuat).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"}</div>
+      ${B.map(b => `<div class="st-baris st-${b.status}"><span>${ik[b.status]}</span><b>${esc(b.nama)}</b><span>${esc(b.teks)}${b.selisih ? ` · <b>${b.selisih} selisih</b>` : ""}</span><small>${b.valid_sd ? "valid s/d " + tg(b.valid_sd) : "belum valid"}</small></div>
+        ${b.rincian.length ? `<table class="st-tabel">${b.rincian.map(r => `<tr><td>${esc(r.id)}</td><td>${esc(r.toko)}</td><td>${esc(String(r.erp))}</td><td>${esc(String(r.sumber))}</td><td>${esc(r.penyebab)}</td></tr>`).join("")}</table>` : ""}
+        ${b.catatan.length ? `<ul class="st-cat">${b.catatan.map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}`).join("")}
+      <div class="st-kaki">Rincian semua bagian: dashboard ERP → Status Data.</div></div>`;
+    el.querySelector(".st-tombol").onclick = () => { const p = el.querySelector(".st-panel"); p.hidden = !p.hidden; };
+  } catch (e) { /* kotak status tidak boleh mengganggu halaman */ }
+}
 let ulangKe = 0, ulangTimer = null;
 function jadwalUlang() {   // [akses-kuning 29 Okt] akun "sementara" dicoba ulang diam-diam tiap 60 dtk, maks 3x per muat
   clearTimeout(ulangTimer);
@@ -467,7 +483,7 @@ async function loadAll(withStructure) {   // withStructure=true (Shift+klik sync
   }
   rebuild();
   S.lastSync = new Date(); S.busy = false; S.fromCache = false; S.syncSec = sec();
-  setLoading(""); render(); saveCache(); jadwalUlang(); muatStatusAkun();
+  setLoading(""); render(); saveCache(); jadwalUlang(); muatStatusAkun(); muatStatusTotal();
 }
 
 async function setStatusLive(e, on) {
