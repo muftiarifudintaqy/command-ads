@@ -1,6 +1,6 @@
 <?php
 /* ============================================================
-   SYNC DATA META → TABEL LOKAL (montera_ads.ins_*) untuk dashboard ads.skinlyfe.id
+   SYNC DATA META → TABEL LOKAL (montera_ads.ins_*) untuk dashboard ads.prepareofficial.com
    Dashboard membaca tabel lokal (api.php?action=local), jadi tidak perlu menunggu Meta.
 
    Pakai:

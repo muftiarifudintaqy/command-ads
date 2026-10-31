@@ -1,4 +1,4 @@
--- Data Meta lokal untuk dashboard ads.skinlyfe.id (diisi /opt/montera-ads/sync-insights.php)
+-- Data Meta lokal untuk dashboard ads.prepareofficial.com (diisi /opt/montera-ads/sync-insights.php)
 -- Metrik per baris = urutan rowArr() di app.js: spend, impr, link click, ATC, purchase, value, freq, view content, video 3 detik, thruplay
 CREATE TABLE IF NOT EXISTS ins_ad (
   act_id        varchar(40)  NOT NULL,
