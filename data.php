@@ -348,7 +348,7 @@ table.arsip-sheet td{text-align:left;white-space:normal}table.arsip-sheet td:las
       . '*Total ' . $NB[$bl] . ' ' . $th . "*\n" . 'Omset Shopee: ' . rp($TOT['so']) . "\n" . 'Pesanan: ' . an($TOT['sp']) . "\n"
       . 'Daily Cost All: ' . rp($TOT['ca']) . "\n" . 'Daily Roas All / ROMI: ' . rs($avgA); ?>
   <div class="alat"><div class="ket" style="margin:0">Laporan lengkap terakhir: <b><?= e($label($a['t'])) ?></b> · dibanding hari sebelumnya <span class="sd">Shopee terisi s/d <b><?= e($sdS) ?></b> · CPAS Meta s/d <b><?= e($sdM) ?></b></span></div>
-    <div class="alat-kanan"><button class="btn abu" id="bSalin" type="button">📋 Salin ringkasan</button></div></div>
+    <div class="alat-kanan"><label class="gb-opsi" title="Hanya tanggal yang ada isinya + baris total"><input type="checkbox" id="gbSampai" checked> Sampai hari ini</label><button class="btn abu" id="bGambar" type="button">🖼 Simpan Gambar</button><button class="btn abu" id="bSalinGbr" type="button">📋 Salin Gambar</button><button class="btn abu" id="bSalin" type="button">📋 Salin ringkasan</button></div></div>
   <script>
   (function () {
     var RK = <?= json_encode($rk, JSON_UNESCAPED_UNICODE) ?>, NAMA = <?= json_encode('Laporan ' . ucfirst($merk) . ' ' . $NB[$bl] . ' ' . $th) ?>;
@@ -411,6 +411,91 @@ table.arsip-sheet td{text-align:left;white-space:normal}table.arsip-sheet td:las
       <td><?= rp($TOT['mc']) ?></td><td><?= rp($TOT['mo']) ?></td><td><?= an($TOT['mp']) ?></td><td><?= rp(bagi($TOT['mc'], $TOT['mp'])) ?></td><td><?= rs($avgM) ?></td><td><?= an($TOT['ma']) ?></td>
       <td><?= rp($TOT['ca']) ?></td><td><?= rp(bagi($TOT['ca'], $TOT['sp'])) ?></td><td><?= rs($avgA) ?></td></tr></tfoot><?php endif; ?>
   </table></div>
+  <?php if ($a): /* [gambar 13 Nov, Mufti] Simpan/Salin Gambar tabel laporan untuk WA: PNG 3x (html2canvas 1.4.1 cdnjs), tabel penuh semua kolom,
+     judul "<Brand> · Laporan <Bulan Tahun> · per <tgl jam>". Tampilan tabel di web, angka & rumus tidak diubah (gambar dibuat dari salinan tabel di luar layar). */ ?>
+  <style>
+  .gb-opsi{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--redup);margin-right:4px;cursor:pointer;user-select:none}
+  .gb-opsi input{accent-color:var(--w);width:15px;height:15px;margin:0}
+  .alat-kanan .btn:disabled{opacity:.55;cursor:wait}
+  .gb-foto{position:fixed;left:-100000px;top:0;width:max-content;background:#fff;padding:22px 22px 20px;pointer-events:none}
+  .gb-foto .gb-j{font-size:22px;font-weight:800;color:#0f172a;margin:0 2px 14px;letter-spacing:-.01em}
+  .gb-foto .gb-tb{border:1px solid #d9dee7;border-radius:12px;overflow:hidden;background:#fff}
+  .gb-foto table.lap{width:auto!important;zoom:1!important;font-size:15px!important}
+  .gb-foto table.lap th,.gb-foto table.lap td{position:static!important}
+  .gb-foto table.lap td{font-size:15px!important;font-variant-numeric:tabular-nums}
+  /* angka: font sistem yang digitnya selebar sama bawaan (html2canvas tidak bisa memakai tabular-nums Inter) */
+  .gb-foto table.lap tbody td:not(:first-child),.gb-foto table.lap tfoot td:not(:first-child){font-family:'Segoe UI',Roboto,'Helvetica Neue',Arial,'DejaVu Sans',sans-serif!important}
+  .gb-foto table.lap tbody td:not(:first-child),.gb-foto table.lap tfoot td:not(:first-child){text-align:right!important}
+  .gb-foto table.lap th{font-size:13px!important}
+  .gb-foto table.lap thead tr:first-child th{font-size:12px!important}
+  .gb-foto .lenc-w{font-size:12px!important}
+  </style>
+  <script>
+  (function () {
+    var G = <?= json_encode(['brand' => ucfirst($merk), 'bulan' => $NB[$bl] . ' ' . $th], JSON_UNESCAPED_UNICODE) ?>;
+    var LIB = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', janjiLib = null;
+    function muatLib() {
+      if (window.html2canvas) return Promise.resolve(window.html2canvas);
+      return janjiLib || (janjiLib = new Promise(function (ok, gagal) { var sc = document.createElement('script'); sc.src = LIB; sc.onload = function () { ok(window.html2canvas); }; sc.onerror = function () { janjiLib = null; gagal(new Error('html2canvas gagal dimuat')); }; document.head.appendChild(sc); }));
+    }
+    function waktu() {   // jam Asia/Jakarta
+      var f = function (o) { try { return new Intl.DateTimeFormat('en-GB', Object.assign({ timeZone: 'Asia/Jakarta' }, o)).formatToParts(new Date()).reduce(function (a, p) { a[p.type] = p.value; return a; }, {}); } catch (e) { return null; } };
+      var x = f({ year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }), d = new Date();
+      if (!x) x = { year: d.getFullYear(), month: ('0' + (d.getMonth() + 1)).slice(-2), day: ('0' + d.getDate()).slice(-2), hour: ('0' + d.getHours()).slice(-2), minute: ('0' + d.getMinutes()).slice(-2) };
+      return { tgl: x.day + '/' + x.month + '/' + x.year, jam: x.hour + ':' + x.minute, iso: x.year + '-' + x.month + '-' + x.day };
+    }
+    function tabel() { return Array.prototype.find.call(document.querySelectorAll('table'), function (t) { return /Daily Roas All/.test((t.tHead || t).textContent) && !t.closest('.gb-foto'); }); }
+    // html2canvas 1.4.1 belum mengenal color()/color-mix(): di salinan saja diganti rgb() hasil hitungan browser
+    function keRgb(v) {
+      var m = /^color\(srgb\s+([-\d.e]+)\s+([-\d.e]+)\s+([-\d.e]+)(?:\s*\/\s*([\d.]+)(%?))?\)$/.exec(v); if (!m) return null;
+      var c = function (x) { return Math.round(Math.max(0, Math.min(1, +x)) * 255); }, a = m[4] == null ? 1 : (+m[4]) / (m[5] ? 100 : 1);
+      return 'rgba(' + c(m[1]) + ',' + c(m[2]) + ',' + c(m[3]) + ',' + a + ')';
+    }
+    var PROP = [['color', 'color'], ['backgroundColor', 'background-color'], ['borderTopColor', 'border-top-color'], ['borderRightColor', 'border-right-color'], ['borderBottomColor', 'border-bottom-color'], ['borderLeftColor', 'border-left-color']];
+    function buat(sampai) {
+      var t = tabel(); if (!t) return Promise.reject(new Error('tabel tidak ditemukan'));
+      var w = waktu(), wadah = document.createElement('div'); wadah.className = 'gb-foto';
+      var judul = document.createElement('div'); judul.className = 'gb-j'; judul.textContent = G.brand + ' · Laporan ' + G.bulan + ' · per ' + w.tgl + ' ' + w.jam;
+      var kotak = document.createElement('div'); kotak.className = 'gb-tb';
+      var c = t.cloneNode(true); c.style.zoom = ''; c.classList.add('lap');
+      if (sampai) Array.prototype.slice.call(c.querySelectorAll('tbody tr.baris-kosong')).forEach(function (r) { r.parentNode.removeChild(r); });
+      kotak.appendChild(c); wadah.appendChild(judul); wadah.appendChild(kotak); document.body.appendChild(wadah);
+      var buang = function () { if (wadah.parentNode) wadah.parentNode.removeChild(wadah); };
+      return muatLib().then(function (h2c) {
+        return h2c(wadah, { scale: 3, backgroundColor: '#ffffff', logging: false, useCORS: true, scrollX: 0, scrollY: 0,
+          windowWidth: Math.max(document.documentElement.clientWidth, wadah.scrollWidth + 40), windowHeight: Math.max(window.innerHeight, wadah.scrollHeight + 40),
+          onclone: function (doc) {
+            var akar = doc.querySelector('.gb-foto'); if (!akar) return; akar.style.left = '0';   // di halaman asli salinan ada di luar layar
+            [akar].concat(Array.prototype.slice.call(akar.querySelectorAll('*'))).forEach(function (el) {
+              var cs = doc.defaultView.getComputedStyle(el);
+              PROP.forEach(function (p) { var v = cs[p[0]]; if (v && v.indexOf('color(') === 0) { var r = keRgb(v); if (r) el.style.setProperty(p[1], r, 'important'); } });
+            });
+          } });
+      }).then(function (cv) {
+        buang();
+        return new Promise(function (ok, gagal) { cv.toBlob(function (b) { b ? ok({ blob: b, nama: 'Laporan-' + G.brand + '-' + w.iso + '.png', lebar: cv.width }) : gagal(new Error('PNG kosong')); }, 'image/png'); });
+      }, function (e) { buang(); throw e; });
+    }
+    function unduh(g) { var a = document.createElement('a'); a.href = URL.createObjectURL(g.blob); a.download = g.nama; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.parentNode.removeChild(a); }, 3000); }
+    var bG = document.getElementById('bGambar'), bS = document.getElementById('bSalinGbr'), cek = document.getElementById('gbSampai');
+    function sibuk(ya) { bG.disabled = bS.disabled = ya; }
+    bG.onclick = function () {
+      sibuk(true);
+      buat(cek.checked).then(function (g) { unduh(g); }, function (e) { kabar('Gambar gagal dibuat: ' + (e && e.message || e), 'Gagal'); }).then(function () { sibuk(false); });
+    };
+    bS.onclick = function () {
+      sibuk(true);
+      var jadi = buat(cek.checked);
+      var bisa = navigator.clipboard && window.ClipboardItem && window.isSecureContext;
+      // ClipboardItem berisi Promise: izin salin tetap dari klik ini walau gambar butuh beberapa detik
+      var salin = bisa ? navigator.clipboard.write([new ClipboardItem({ 'image/png': jadi.then(function (g) { return g.blob; }) })]) : Promise.reject(new Error('tidak didukung'));
+      salin.then(function () { kabar('Gambar tabel sudah disalin. Tinggal tempel (Ctrl+V) di WhatsApp Web.', 'Tersalin'); }, function () {
+        return jadi.then(function (g) { unduh(g); kabar('Browser tidak mengizinkan salin gambar, jadi gambarnya diunduh: ' + g.nama, 'Diunduh'); });
+      }).catch(function (e) { kabar('Gambar gagal dibuat: ' + (e && e.message || e), 'Gagal'); }).then(function () { sibuk(false); });
+    };
+  })();
+  </script>
+  <?php endif; ?>
 
 <?php elseif ($tab === 'tahun'):
   $thn = (int)($_GET['tahun'] ?? date('Y')); if ($thn < 2020 || $thn > (int)date('Y')) $thn = (int)date('Y');
