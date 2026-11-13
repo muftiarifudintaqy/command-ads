@@ -317,6 +317,20 @@ table.lap .rw{font-weight:800}
 .kartu .k .s{color:#1f2937;font-weight:600}
 .sheet-link{display:inline-flex;gap:6px;align-items:center;margin-left:8px}.sheet-link .btn{padding:6px 12px;font-size:13px}
 table.arsip-sheet td{text-align:left;white-space:normal}table.arsip-sheet td:last-child{white-space:nowrap}
+/* [screenshot 13 Nov, Mufti] tabel laporan tajam untuk screenshot biasa: tanpa zoom, font isi 15px (min 14), header 13px, total 15px bold, teks #111,
+   angka berat 500 tabular rata kanan; muat 1440 px lewat padding kecil & judul kolom 2 baris. Angka, rumus, warna ROAS & garis pemisah tidak diubah. */
+.isi:has(table.lap){padding-left:8px!important;padding-right:8px!important}
+*:has(> table.lap){overflow-x:auto!important}
+table.lap{width:100%!important}
+table.lap td{font-size:15px!important;font-weight:500!important;color:#111!important;font-variant-numeric:tabular-nums!important;padding:5px 3px!important;border-bottom:1px solid #e3e7ee!important;line-height:1.3}
+table.lap tbody td:first-child{font-weight:600!important;padding-left:8px!important}
+table.lap th{font-size:13px!important;max-width:80px!important;padding:6px 3px!important;line-height:1.2!important}
+table.lap thead tr:first-child th{font-size:13px!important;letter-spacing:.06em}
+table.lap tfoot td{font-size:15px!important;font-weight:700!important;color:#111!important;padding-top:7px!important;padding-bottom:7px!important}
+table.lap tfoot td:first-child{padding-left:8px!important}
+table.lap .rp{font-size:.78em;font-weight:500;color:#4b5563;margin-right:1px}
+table.lap tfoot .rp{font-weight:600}
+table.lap tr.ket-kosong td{font-size:12.5px!important;color:#64748b!important;font-weight:500!important;text-align:left!important;padding:5px 8px!important;background:#fafbfc!important;position:static!important}
 </style></head><body>
 <div class="atas">
   <a class="kembali" href="index.php">← Dashboard</a><h1>Data Ads</h1>
@@ -348,7 +362,7 @@ table.arsip-sheet td{text-align:left;white-space:normal}table.arsip-sheet td:las
       . '*Total ' . $NB[$bl] . ' ' . $th . "*\n" . 'Omset Shopee: ' . rp($TOT['so']) . "\n" . 'Pesanan: ' . an($TOT['sp']) . "\n"
       . 'Daily Cost All: ' . rp($TOT['ca']) . "\n" . 'Daily Roas All / ROMI: ' . rs($avgA); ?>
   <div class="alat"><div class="ket" style="margin:0">Laporan lengkap terakhir: <b><?= e($label($a['t'])) ?></b> · dibanding hari sebelumnya <span class="sd">Shopee terisi s/d <b><?= e($sdS) ?></b> · CPAS Meta s/d <b><?= e($sdM) ?></b></span></div>
-    <div class="alat-kanan"><label class="gb-opsi" title="Hanya tanggal yang ada isinya + baris total"><input type="checkbox" id="gbSampai" checked> Sampai hari ini</label><button class="btn abu" id="bGambar" type="button">🖼 Simpan Gambar</button><button class="btn abu" id="bSalinGbr" type="button">📋 Salin Gambar</button><button class="btn abu" id="bSalin" type="button">📋 Salin ringkasan</button></div></div>
+    <div class="alat-kanan"><button class="btn abu" id="bSalin" type="button">📋 Salin ringkasan</button></div></div>
   <script>
   (function () {
     var RK = <?= json_encode($rk, JSON_UNESCAPED_UNICODE) ?>, NAMA = <?= json_encode('Laporan ' . ucfirst($merk) . ' ' . $NB[$bl] . ' ' . $th) ?>;
@@ -367,11 +381,8 @@ table.arsip-sheet td{text-align:left;white-space:normal}table.arsip-sheet td:las
         var r = Math.min(window.innerWidth / isiL.scrollWidth, window.innerHeight / isiL.scrollHeight, 1);
         isiL.style.zoom = Math.max(0.4, r); return;
       }
+      // [screenshot 13 Nov, Mufti] tampilan biasa TANPA zoom (dulu dikecilkan sampai 0,5–0,64 supaya muat → hasil screenshot buram); tabel diatur muat 1440 px lewat CSS
       isiL.style.zoom = 1; tblL.style.zoom = 1; for (var el = isiL; el && el !== document.body; el = el.parentElement) { el.style.maxWidth = 'none'; el.style.marginLeft = el.style.marginRight = '0'; }
-      var hA = (document.querySelector('.atas') || { offsetHeight: 64 }).offsetHeight, hB = (document.querySelector('.lembar') || { offsetHeight: 56 }).offsetHeight;
-      var muatTinggi = (window.innerHeight - hA - hB - 12) / (isiL.scrollHeight + 8), muatLebar = tabelL.clientWidth / tblL.scrollWidth;
-      isiL.style.zoom = Math.max(0.5, Math.min(1, muatTinggi, muatLebar));
-      if (isiL.getBoundingClientRect().top < hA) window.scrollTo(0, 0);
     }
     window.addEventListener('resize', pas); window.addEventListener('load', pas); setTimeout(pas, 60); setTimeout(pas, 500);
     function keluarReport() { document.body.classList.remove('mode-report'); pas(); }
@@ -395,107 +406,34 @@ table.arsip-sheet td{text-align:left;white-space:normal}table.arsip-sheet td:las
   </div>
   <div class="ket">Total <?= e($NB[$bl] . ' ' . $th) ?>: Omset Shopee <b><?= rp($TOT['so']) ?></b> · Omset Meta <b><?= rp($TOT['mo']) ?></b> · Cost <b><?= rp($TOT['ca']) ?></b> · Daily Roas All / ROMI <b><?= rs($avgA) ?></b> · <?= an($TOT['sp']) ?> pesanan · rata-rata omset Shopee/hari <b><?= rp(bagi($TOT['so'], (float)$TOT['n'])) ?></b></div>
   <?php else: ?><div class="ket">Belum ada data bulan ini.</div><?php endif; ?>
+  <?php /* [screenshot 13 Nov, Mufti] bulan berjalan: tanggal sesudah hari terakhir terisi disembunyikan (1 baris keterangan); bulan lewat tampil semua.
+           Label tanggal/total dipendekkan & awalan "Rp" dikecilkan supaya 16 kolom muat 1440 px tanpa zoom; angka & rumus tidak diubah. */
+    $akhirIsi = null; foreach ($HARI as $r_) if ($r_['sc'] || $r_['so'] || $r_['mc']) $akhirIsi = $r_['t'];
+    $bulanIni = sprintf('%04d-%02d', $th, $bl) === date('Y-m');
+    $sembunyi = $bulanIni ? array_values(array_filter($HARI, function ($r_) use ($akhirIsi) { return $akhirIsi === null || $r_['t'] > $akhirIsi; })) : [];
+    $HARI_T = $bulanIni ? array_values(array_filter($HARI, function ($r_) use ($akhirIsi) { return $akhirIsi !== null && $r_['t'] <= $akhirIsi; })) : $HARI;
+    $HR3 = ['Minggu' => 'Min', 'Senin' => 'Sen', 'Selasa' => 'Sel', 'Rabu' => 'Rab', 'Kamis' => 'Kam', 'Jumat' => 'Jum', "Jum'at" => 'Jum', 'Sabtu' => 'Sab'];
+    $pendek = function ($t) use ($label, $HR3) { $x = (string)$label($t); return preg_replace_callback('/^(\S+?),\s*(\d+)\s+(\S{3})\S*/u', function ($m) use ($HR3) { return ($HR3[$m[1]] ?? mb_substr($m[1], 0, 3)) . ', ' . $m[2] . ' ' . $m[3]; }, $x); };
+    ob_start(); ?>
   <div class="tabel"><table>
     <thead><tr><th></th><th colspan="6">SHOPEE</th><th colspan="6">CPAS META</th><th colspan="3">Daily All Platform</th></tr>
     <tr><th>Tanggal</th><th>Cost</th><th>Presentase Shopee Ads</th><th>Omset</th><th>Pesanan</th><th>CPR</th><th>ROAS</th><th>Cost</th><th>Omset</th><th>Purchases with shared items</th><th>CPR</th><th>ROAS</th><th>Adds to cart with shared items</th><th>Daily Cost All</th><th>Daily CPR All</th><th>Daily Roas All / ROMI</th></tr></thead>
     <?php $romiW = function ($v) { if ($v === null) return '–'; $k = $v < 2.5 ? 'rw-m' : ($v < 3 ? 'rw-h' : 'rw-b'); return '<span class="rw ' . $k . '">' . rs($v) . '</span>'; }; ?>
-    <tbody><?php foreach ($HARI as $r): $sh = ($r['sc'] || $r['so']); $mt = (bool)$r['mc']; $lewat = $r['t'] <= date('Y-m-d');
+    <tbody><?php foreach ($HARI_T as $r): $sh = ($r['sc'] || $r['so']); $mt = (bool)$r['mc']; $lewat = $r['t'] <= date('Y-m-d');
       $kos = function ($ok, $v) { return $ok ? $v : '<span class="kosong">—</span>'; }; ?>
     <tr class="<?= !$sh && !$mt ? 'baris-kosong' : '' ?>">
-      <td><?= e($label($r['t'])) ?><?= ($mt && !$sh && $lewat) ? ' <span class="lenc-w">Shopee belum diisi</span>' : '' ?></td>
+      <td title="<?= e($label($r['t'])) ?>"><?= e($pendek($r['t'])) ?><?= ($mt && !$sh && $lewat) ? ' <span class="lenc-w">Shopee belum diisi</span>' : '' ?></td>
       <td><?= $kos($sh, rp($r['sc'])) ?></td><td><?= $kos($sh, ps(bagi($r['sc'], $r['ca']))) ?></td><td><?= $kos($sh, rp($r['so'])) ?></td><td><?= $kos($sh, an($r['sp'])) ?></td><td><?= $kos($sh, rp(bagi($r['sc'], $r['sp']))) ?></td><td><?= $kos($sh, rs($r['sr'] ?? bagi($r['so'], $r['sc']))) ?></td>
       <td><?= $kos($mt, rp($r['mc'])) ?></td><td><?= $kos($mt, rp($r['mo'])) ?></td><td><?= $kos($mt, an($r['mp'])) ?></td><td><?= $kos($mt, rp(bagi($r['mc'], $r['mp']))) ?></td><td><?= $kos($mt, rs(bagi($r['mo'], $r['mc']))) ?></td><td><?= $kos($mt, an($r['ma'])) ?></td>
       <td><?= $kos($sh || $mt, rp($r['ca'])) ?></td><td><?= $kos($sh, rp(bagi($r['ca'], $r['sp']))) ?></td><td><?= $kos($sh, $romiW(bagi($r['so'], $r['ca']))) ?></td>
-    </tr><?php endforeach; ?></tbody>
-    <?php if ($isi): ?><tfoot><tr><td><?= e($NB[$bl] . ' ' . $th) ?></td><td><?= rp($TOT['sc']) ?></td><td><?= ps(bagi($TOT['sc'], $TOT['ca'])) ?></td><td><?= rp($TOT['so']) ?></td><td><?= an($TOT['sp']) ?></td><td><?= rp(bagi($TOT['sc'], $TOT['sp'])) ?></td><td><?= rs($avgS) ?></td>
+    </tr><?php endforeach; ?>
+    <?php if ($sembunyi): $s1 = (int)date('j', strtotime($sembunyi[0]['t'])); $s2 = (int)date('j', strtotime($sembunyi[count($sembunyi) - 1]['t'])); ?>
+    <tr class="ket-kosong"><td colspan="16"><?= $s1 === $s2 ? $s1 : $s1 . '–' . $s2 ?> <?= e(substr($NB[$bl], 0, 3)) ?> belum ada data</td></tr><?php endif; ?></tbody>
+    <?php if ($isi): ?><tfoot><tr><td title="<?= e($NB[$bl] . ' ' . $th) ?>">Total <?= e(substr($NB[$bl], 0, 3) . ' ' . $th) ?></td><td><?= rp($TOT['sc']) ?></td><td><?= ps(bagi($TOT['sc'], $TOT['ca'])) ?></td><td><?= rp($TOT['so']) ?></td><td><?= an($TOT['sp']) ?></td><td><?= rp(bagi($TOT['sc'], $TOT['sp'])) ?></td><td><?= rs($avgS) ?></td>
       <td><?= rp($TOT['mc']) ?></td><td><?= rp($TOT['mo']) ?></td><td><?= an($TOT['mp']) ?></td><td><?= rp(bagi($TOT['mc'], $TOT['mp'])) ?></td><td><?= rs($avgM) ?></td><td><?= an($TOT['ma']) ?></td>
       <td><?= rp($TOT['ca']) ?></td><td><?= rp(bagi($TOT['ca'], $TOT['sp'])) ?></td><td><?= rs($avgA) ?></td></tr></tfoot><?php endif; ?>
   </table></div>
-  <?php if ($a): /* [gambar 13 Nov, Mufti] Simpan/Salin Gambar tabel laporan untuk WA: PNG 3x (html2canvas 1.4.1 cdnjs), tabel penuh semua kolom,
-     judul "<Brand> · Laporan <Bulan Tahun> · per <tgl jam>". Tampilan tabel di web, angka & rumus tidak diubah (gambar dibuat dari salinan tabel di luar layar). */ ?>
-  <style>
-  .gb-opsi{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--redup);margin-right:4px;cursor:pointer;user-select:none}
-  .gb-opsi input{accent-color:var(--w);width:15px;height:15px;margin:0}
-  .alat-kanan .btn:disabled{opacity:.55;cursor:wait}
-  .gb-foto{position:fixed;left:-100000px;top:0;width:max-content;background:#fff;padding:22px 22px 20px;pointer-events:none}
-  .gb-foto .gb-j{font-size:22px;font-weight:800;color:#0f172a;margin:0 2px 14px;letter-spacing:-.01em}
-  .gb-foto .gb-tb{border:1px solid #d9dee7;border-radius:12px;overflow:hidden;background:#fff}
-  .gb-foto table.lap{width:auto!important;zoom:1!important;font-size:15px!important}
-  .gb-foto table.lap th,.gb-foto table.lap td{position:static!important}
-  .gb-foto table.lap td{font-size:15px!important;font-variant-numeric:tabular-nums}
-  /* angka: font sistem yang digitnya selebar sama bawaan (html2canvas tidak bisa memakai tabular-nums Inter) */
-  .gb-foto table.lap tbody td:not(:first-child),.gb-foto table.lap tfoot td:not(:first-child){font-family:'Segoe UI',Roboto,'Helvetica Neue',Arial,'DejaVu Sans',sans-serif!important}
-  .gb-foto table.lap tbody td:not(:first-child),.gb-foto table.lap tfoot td:not(:first-child){text-align:right!important}
-  .gb-foto table.lap th{font-size:13px!important}
-  .gb-foto table.lap thead tr:first-child th{font-size:12px!important}
-  .gb-foto .lenc-w{font-size:12px!important}
-  </style>
-  <script>
-  (function () {
-    var G = <?= json_encode(['brand' => ucfirst($merk), 'bulan' => $NB[$bl] . ' ' . $th], JSON_UNESCAPED_UNICODE) ?>;
-    var LIB = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', janjiLib = null;
-    function muatLib() {
-      if (window.html2canvas) return Promise.resolve(window.html2canvas);
-      return janjiLib || (janjiLib = new Promise(function (ok, gagal) { var sc = document.createElement('script'); sc.src = LIB; sc.onload = function () { ok(window.html2canvas); }; sc.onerror = function () { janjiLib = null; gagal(new Error('html2canvas gagal dimuat')); }; document.head.appendChild(sc); }));
-    }
-    function waktu() {   // jam Asia/Jakarta
-      var f = function (o) { try { return new Intl.DateTimeFormat('en-GB', Object.assign({ timeZone: 'Asia/Jakarta' }, o)).formatToParts(new Date()).reduce(function (a, p) { a[p.type] = p.value; return a; }, {}); } catch (e) { return null; } };
-      var x = f({ year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }), d = new Date();
-      if (!x) x = { year: d.getFullYear(), month: ('0' + (d.getMonth() + 1)).slice(-2), day: ('0' + d.getDate()).slice(-2), hour: ('0' + d.getHours()).slice(-2), minute: ('0' + d.getMinutes()).slice(-2) };
-      return { tgl: x.day + '/' + x.month + '/' + x.year, jam: x.hour + ':' + x.minute, iso: x.year + '-' + x.month + '-' + x.day };
-    }
-    function tabel() { return Array.prototype.find.call(document.querySelectorAll('table'), function (t) { return /Daily Roas All/.test((t.tHead || t).textContent) && !t.closest('.gb-foto'); }); }
-    // html2canvas 1.4.1 belum mengenal color()/color-mix(): di salinan saja diganti rgb() hasil hitungan browser
-    function keRgb(v) {
-      var m = /^color\(srgb\s+([-\d.e]+)\s+([-\d.e]+)\s+([-\d.e]+)(?:\s*\/\s*([\d.]+)(%?))?\)$/.exec(v); if (!m) return null;
-      var c = function (x) { return Math.round(Math.max(0, Math.min(1, +x)) * 255); }, a = m[4] == null ? 1 : (+m[4]) / (m[5] ? 100 : 1);
-      return 'rgba(' + c(m[1]) + ',' + c(m[2]) + ',' + c(m[3]) + ',' + a + ')';
-    }
-    var PROP = [['color', 'color'], ['backgroundColor', 'background-color'], ['borderTopColor', 'border-top-color'], ['borderRightColor', 'border-right-color'], ['borderBottomColor', 'border-bottom-color'], ['borderLeftColor', 'border-left-color']];
-    function buat(sampai) {
-      var t = tabel(); if (!t) return Promise.reject(new Error('tabel tidak ditemukan'));
-      var w = waktu(), wadah = document.createElement('div'); wadah.className = 'gb-foto';
-      var judul = document.createElement('div'); judul.className = 'gb-j'; judul.textContent = G.brand + ' · Laporan ' + G.bulan + ' · per ' + w.tgl + ' ' + w.jam;
-      var kotak = document.createElement('div'); kotak.className = 'gb-tb';
-      var c = t.cloneNode(true); c.style.zoom = ''; c.classList.add('lap');
-      if (sampai) Array.prototype.slice.call(c.querySelectorAll('tbody tr.baris-kosong')).forEach(function (r) { r.parentNode.removeChild(r); });
-      kotak.appendChild(c); wadah.appendChild(judul); wadah.appendChild(kotak); document.body.appendChild(wadah);
-      var buang = function () { if (wadah.parentNode) wadah.parentNode.removeChild(wadah); };
-      return muatLib().then(function (h2c) {
-        return h2c(wadah, { scale: 3, backgroundColor: '#ffffff', logging: false, useCORS: true, scrollX: 0, scrollY: 0,
-          windowWidth: Math.max(document.documentElement.clientWidth, wadah.scrollWidth + 40), windowHeight: Math.max(window.innerHeight, wadah.scrollHeight + 40),
-          onclone: function (doc) {
-            var akar = doc.querySelector('.gb-foto'); if (!akar) return; akar.style.left = '0';   // di halaman asli salinan ada di luar layar
-            [akar].concat(Array.prototype.slice.call(akar.querySelectorAll('*'))).forEach(function (el) {
-              var cs = doc.defaultView.getComputedStyle(el);
-              PROP.forEach(function (p) { var v = cs[p[0]]; if (v && v.indexOf('color(') === 0) { var r = keRgb(v); if (r) el.style.setProperty(p[1], r, 'important'); } });
-            });
-          } });
-      }).then(function (cv) {
-        buang();
-        return new Promise(function (ok, gagal) { cv.toBlob(function (b) { b ? ok({ blob: b, nama: 'Laporan-' + G.brand + '-' + w.iso + '.png', lebar: cv.width }) : gagal(new Error('PNG kosong')); }, 'image/png'); });
-      }, function (e) { buang(); throw e; });
-    }
-    function unduh(g) { var a = document.createElement('a'); a.href = URL.createObjectURL(g.blob); a.download = g.nama; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.parentNode.removeChild(a); }, 3000); }
-    var bG = document.getElementById('bGambar'), bS = document.getElementById('bSalinGbr'), cek = document.getElementById('gbSampai');
-    function sibuk(ya) { bG.disabled = bS.disabled = ya; }
-    bG.onclick = function () {
-      sibuk(true);
-      buat(cek.checked).then(function (g) { unduh(g); }, function (e) { kabar('Gambar gagal dibuat: ' + (e && e.message || e), 'Gagal'); }).then(function () { sibuk(false); });
-    };
-    bS.onclick = function () {
-      sibuk(true);
-      var jadi = buat(cek.checked);
-      var bisa = navigator.clipboard && window.ClipboardItem && window.isSecureContext;
-      // ClipboardItem berisi Promise: izin salin tetap dari klik ini walau gambar butuh beberapa detik
-      var salin = bisa ? navigator.clipboard.write([new ClipboardItem({ 'image/png': jadi.then(function (g) { return g.blob; }) })]) : Promise.reject(new Error('tidak didukung'));
-      salin.then(function () { kabar('Gambar tabel sudah disalin. Tinggal tempel (Ctrl+V) di WhatsApp Web.', 'Tersalin'); }, function () {
-        return jadi.then(function (g) { unduh(g); kabar('Browser tidak mengizinkan salin gambar, jadi gambarnya diunduh: ' + g.nama, 'Diunduh'); });
-      }).catch(function (e) { kabar('Gambar gagal dibuat: ' + (e && e.message || e), 'Gagal'); }).then(function () { sibuk(false); });
-    };
-  })();
-  </script>
-  <?php endif; ?>
+<?php echo preg_replace('/<td>Rp(?=\d)/', '<td><span class="rp">Rp</span>', ob_get_clean()); ?>
 
 <?php elseif ($tab === 'tahun'):
   $thn = (int)($_GET['tahun'] ?? date('Y')); if ($thn < 2020 || $thn > (int)date('Y')) $thn = (int)date('Y');
