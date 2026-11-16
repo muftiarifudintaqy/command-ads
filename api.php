@@ -289,7 +289,7 @@ if ($action === 'local') {
 }
 /* tombol refresh: jalankan sync di background (tidak menunggu Meta di request ini) */
 if ($action === 'refresh') {
-    $from = (string) ($in['from'] ?? ''); $to = (string) ($in['to'] ?? ''); $today = date('Y-m-d');
+    $from = (string) ($in['from'] ?? ''); $to = (string) ($in['to'] ?? ''); $today = (new DateTime('now', new DateTimeZone('Asia/Jakarta')))->format('Y-m-d');   // [tanggal-wib 16 Nov] PHP Apache = UTC
     if (!ins_date($from) || !ins_date($to) || $from > $to) fail('Tanggal tidak valid');
     if ($to > $today) $to = $today;
     if ($from > $today) $from = $today;

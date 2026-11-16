@@ -29,15 +29,16 @@ const fmtDay = s => parseD(s).toLocaleDateString("id-ID", { weekday: "short", da
 const WIB = "Asia/Jakarta";   // [jam-wib 16 Nov] semua tampilan jam = WIB, tidak ikut zona waktu browser
 const hhmm = d => d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: WIB });
 const tglWIB = d => d.toLocaleDateString("id-ID", { timeZone: WIB });
+const ymdWIB = d => new Intl.DateTimeFormat("en-CA", { timeZone: WIB, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);   // [tanggal-wib 16 Nov] "hari ini" = tanggal WIB, tidak ikut browser
 const NOW = new Date();
-let TODAY = ymd(NOW);
+let TODAY = ymdWIB(NOW);
 const PRESET = {
   today: ["Hari Ini", () => [TODAY, TODAY]],
   yesterday: ["Kemarin", () => { const y = addDays(TODAY, -1); return [y, y]; }],
   last7: ["7 Hari Terakhir", () => [addDays(TODAY, -6), TODAY]],
   last30: ["30 Hari Terakhir", () => [addDays(TODAY, -29), TODAY]],
   month: ["Bulan Ini", () => [TODAY.slice(0, 8) + "01", TODAY]],
-  lastmonth: ["Bulan Lalu", () => [ymd(new Date(NOW.getFullYear(), NOW.getMonth() - 1, 1)), ymd(new Date(NOW.getFullYear(), NOW.getMonth(), 0))]]
+  lastmonth: ["Bulan Lalu", () => { const t = parseD(TODAY); return [ymd(new Date(t.getFullYear(), t.getMonth() - 1, 1)), ymd(new Date(t.getFullYear(), t.getMonth(), 0))]; }]
 };
 
 // ---------- STATE ----------
@@ -536,7 +537,7 @@ const adsIn = e => adsOf(e).filter(a => scopeOk(a) && qOk(a));
 let M = new Map(), AM = new Map();
 
 function compute() {
-  TODAY = ymd(new Date());
+  TODAY = ymdWIB(new Date());
   RANGE = daysIn(S.from, S.to);
   QSET = S.q ? new Set(ADS.filter(a => adHay(a).includes(S.q)).map(a => a.id)) : null;
   AM = new Map(ADS.map(a => [a.id, adMetrics(a)]));
@@ -1832,7 +1833,7 @@ $("#chat").addEventListener("click", async e => {
 hydrateCache();
 render();
 loadAll(false);
-setInterval(() => { if (S.to === ymd(new Date()) && !document.hidden) loadAll(false); }, CFG.autoRefreshMinutes * 60000);
+setInterval(() => { if (S.to === ymdWIB(new Date()) && !document.hidden) loadAll(false); }, CFG.autoRefreshMinutes * 60000);
 setInterval(() => { if (!S.busy) renderHeader(); }, 30000);
 
 // ---------- [riwayat-chat] percakapan tersimpan di server, bisa dibuka lagi & dihapus ----------
