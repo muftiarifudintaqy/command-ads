@@ -26,7 +26,9 @@ const daysIn = (a, b) => { const o = []; for (let s = a; s <= b; s = addDays(s, 
 const fmtD = s => parseD(s).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
 const fmtNum = s => { const d = parseD(s); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`; };
 const fmtDay = s => parseD(s).toLocaleDateString("id-ID", { weekday: "short", day: "numeric", month: "short" });
-const hhmm = d => d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+const WIB = "Asia/Jakarta";   // [jam-wib 16 Nov] semua tampilan jam = WIB, tidak ikut zona waktu browser
+const hhmm = d => d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: WIB });
+const tglWIB = d => d.toLocaleDateString("id-ID", { timeZone: WIB });
 const NOW = new Date();
 let TODAY = ymd(NOW);
 const PRESET = {
@@ -372,7 +374,7 @@ function localRows(L, x) {   // baris ringkas api.php?action=local → bentuk ap
     x.acc.map(r => ({ date_start: r[0], spend: r[1], impressions: r[2], inline_link_clicks: r[3], x: [r[1], r[2], r[3], r[4], r[5], r[6], 0, r[7], r[8], r[9]] }))
   ];
 }
-const parseDT = s => s ? new Date(s.replace(" ", "T")) : null;
+const parseDT = s => s ? new Date(s.replace(" ", "T") + "+07:00") : null;   // jam DB (DATETIME) = WIB tanpa offset
 // [akses-kuning 29 Okt] kegagalan tarik dibedakan: "akses" (#200/10/294/190, token) → badge kuning "akses perlu dicek";
 // selain itu (limit 17, code 100, timeout, server) = "sementara" → dicoba ulang otomatis, tidak ditampilkan sebagai gagal.
 const jenisGagal = (msg, acc) => /#\s?(10|200|294)\b|code (10|200|294|190)\b|\(#(10|200|294)\)|ads_read|ads_management|permission|grant|token|session has expired|OAuth|190/i.test(String(msg))
@@ -415,7 +417,7 @@ async function muatStatusTotal() {
     const tg = d => d ? new Date(d + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short" }) : "belum valid";
     el.className = "status-total " + (B.some(b => b.status === "err") ? "err" : B.some(b => b.status === "warn") ? "cek" : "ok");
     el.innerHTML = `<button type="button" class="st-tombol">Status Data ${B.map(b => ik[b.status]).join("")}</button><div class="st-panel" hidden>
-      <div class="st-judul">Validasi harian total · dicek ${j.dibuat ? new Date(j.dibuat).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"}</div>
+      <div class="st-judul">Validasi harian total · dicek ${j.dibuat ? new Date(j.dibuat).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: WIB }) : "—"}</div>
       ${B.map(b => `<div class="st-baris st-${b.status}"><span>${ik[b.status]}</span><b>${esc(b.nama)}</b><span>${esc(b.teks)}${b.selisih ? ` · <b>${b.selisih} selisih</b>` : ""}</span><small>${b.valid_sd ? "valid s/d " + tg(b.valid_sd) : "belum valid"}</small></div>
         ${b.rincian.length ? `<table class="st-tabel">${b.rincian.map(r => `<tr><td>${esc(r.id)}</td><td>${esc(r.toko)}</td><td>${esc(String(r.erp))}</td><td>${esc(String(r.sumber))}</td><td>${esc(r.penyebab)}</td></tr>`).join("")}</table>` : ""}
         ${b.catatan.length ? `<ul class="st-cat">${b.catatan.map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}`).join("")}
@@ -802,7 +804,7 @@ function renderHeader() {
   const src = S.local ? (S.local === ACCOUNTS.length ? "DATA LOKAL" : `LOKAL ${S.local}/${ACCOUNTS.length}`) : "LIVE";
   $("#srcBadge").innerHTML = `<span class="flame">🔥</span><b>${src}</b>${errs.length ? ` · ${errs.length} akun akses perlu dicek` : S.local ? " · sinkron Meta" : " · Meta API"}`;
   $("#srcBadge").title = "Klik untuk lihat log sync per akun";
-  const when = d => d.toDateString() === new Date().toDateString() ? hhmm(d) : `${d.toLocaleDateString("id-ID", { day: "numeric", month: "short" })} ${hhmm(d)}`;
+  const when = d => tglWIB(d) === tglWIB(new Date()) ? hhmm(d) : `${d.toLocaleDateString("id-ID", { day: "numeric", month: "short", timeZone: WIB })} ${hhmm(d)}`;
   $("#updated").textContent = S.localAt
     ? `Data terakhir diperbarui ${when(S.localAt)}${S.refreshing ? " · memperbarui di background…" : S.busy ? " · memuat…" : ""}`
     : S.lastSync ? `${S.fromCache ? "Data tersimpan" : "Updated"} ${hhmm(S.lastSync)}${S.syncSec != null && !S.fromCache ? ` (${S.syncSec} dtk)` : ""}${S.busy ? " · memperbarui…" : S.to === TODAY ? ` · auto ${CFG.autoRefreshMinutes} mnt` : ""}` : "Menghubungkan…";

@@ -89,7 +89,7 @@ if ($action === 'status_akun') {
         if ($p && $p['status'] === 'selisih') { $catatan[] = "{$nama[$id]}: selisih setelah tarik ulang — {$p['catatan']}"; continue; }
         $ok++;
     }
-    out(['valid_sd' => $cek['valid_sd'] ?? null, 'cek_pagi' => isset($cek['waktu']) ? date('d/m H:i', strtotime($cek['waktu'])) : null, 'ok' => $ok, 'total' => count($ids), 'catatan' => $catatan]);
+    out(['valid_sd' => $cek['valid_sd'] ?? null, 'cek_pagi' => isset($cek['waktu']) ? (new DateTime($cek['waktu']))->setTimezone(new DateTimeZone('Asia/Jakarta'))->format('d/m H:i') : null, 'ok' => $ok, 'total' => count($ids), 'catatan' => $catatan]);
 }
 
 /* ---------- [validasi-total 30 Okt] kotak "Status Data": hasil Validasi Harian Total (ERP & ads), rincian hanya untuk Iklan ---------- */

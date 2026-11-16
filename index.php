@@ -2,6 +2,7 @@
 /* ADS COMMAND — halaman utama */
 declare(strict_types=1);
 require __DIR__ . '/auth.php';
+date_default_timezone_set('Asia/Jakarta');   // [jam-wib 16 Nov] tampilan jam = WIB (PHP di Apache bawaannya UTC); data yang disimpan tidak diubah
 ma_session_start();
 $C = require __DIR__ . (is_file(__DIR__ . '/config.php') ? '/config.php' : '/config.example.php');   // laptop: config.php · server: env var
 if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(16));
