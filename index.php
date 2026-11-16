@@ -176,21 +176,21 @@ $public = [
     $bcPesan = [];
     if (is_array($bc)) {
         foreach ($bc['tanpa_brand'] ?? [] as $a)
-            $bcPesan[] = htmlspecialchars($a['account_name']) . ' (' . htmlspecialchars($a['account_id']) . ') — brand ' . htmlspecialchars($a['brand'] ?: 'kosong') . ', spend 35 hari Rp' . number_format((float)$a['spend'], 0, ',', '.') . ', terakhir ' . htmlspecialchars($a['terakhir']);
+            $bcPesan[] = htmlspecialchars((string)($a['account_name'])) . ' (' . htmlspecialchars((string)($a['account_id'])) . ') — brand ' . htmlspecialchars((string)($a['brand'] ?: 'kosong')) . ', spend 35 hari Rp' . number_format((float)$a['spend'], 0, ',', '.') . ', terakhir ' . htmlspecialchars((string)($a['terakhir']));
         foreach ($bc['gagal'] ?? [] as $a)
-            $bcPesan[] = htmlspecialchars($a['account_name']) . ' (' . htmlspecialchars($a['account_id']) . ') — GAGAL ditarik ke ERP jam ' . date('H:i', strtotime($bc['waktu'])) . ', angka lama dipertahankan: ' . htmlspecialchars($a['pesan']);
+            $bcPesan[] = htmlspecialchars((string)($a['account_name'])) . ' (' . htmlspecialchars((string)($a['account_id'])) . ') — GAGAL ditarik ke ERP jam ' . date('H:i', strtotime($bc['waktu'])) . ', angka lama dipertahankan: ' . htmlspecialchars((string)($a['pesan']));
         try {
             $e = []; foreach (@file('/etc/montera-ads-db.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $l) if (strpos($l, '=') !== false) { [$k, $x] = explode('=', $l, 2); $e[trim($k)] = trim($x, " \t\"'"); }
             $pdo = new PDO('mysql:host=' . ($e['DB_HOST'] ?? 'localhost') . ';dbname=' . ($e['DB_NAME'] ?? 'montera_ads') . ';charset=utf8mb4', $e['DB_USER'] ?? '', $e['DB_PASS'] ?? '');
             $erp = array_flip($bc['erp_akun'] ?? []);
             foreach ($pdo->query("SELECT nama, act_id FROM akun WHERE aktif = 1 AND act_id IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC) as $a)
-                if (!isset($erp[preg_replace('/^act_/', '', $a['act_id'])])) $bcPesan[] = htmlspecialchars($a['nama']) . ' (' . htmlspecialchars($a['act_id']) . ') — belum ada di ERP Akun Meta, biaya iklannya belum masuk laba';
+                if (!isset($erp[preg_replace('/^act_/', '', $a['act_id'])])) $bcPesan[] = htmlspecialchars((string)($a['nama'])) . ' (' . htmlspecialchars((string)($a['act_id'])) . ') — belum ada di ERP Akun Meta, biaya iklannya belum masuk laba';
         } catch (Throwable $ex) { }
     }
     // [sheet-patokan] akun yang gagal ditarik Meta / gagal ditulis ke tab sheet oleh tarik-meta (angka lama di sheet dipertahankan)
     $tm = json_decode((string)@file_get_contents('/var/lib/montera-ads/tarik-meta-status.json'), true);
     foreach (array_merge($tm['gagal_meta'] ?? [], $tm['gagal_sheet'] ?? []) as $a)
-        $bcPesan[] = htmlspecialchars($a['nama']) . ' — GAGAL diisi ke sheet jam ' . date('H:i', strtotime($tm['waktu'])) . ' (' . htmlspecialchars($tm['rentang']) . '), angka lama dipertahankan: ' . htmlspecialchars($a['pesan']);
+        $bcPesan[] = htmlspecialchars((string)($a['nama'])) . ' — GAGAL diisi ke sheet jam ' . date('H:i', strtotime($tm['waktu'])) . ' (' . htmlspecialchars($tm['rentang']) . '), angka lama dipertahankan: ' . htmlspecialchars((string)($a['pesan']));
     if ($bcPesan): ?>
     <div class="brand-warn" role="alert"><b>Cek akun Meta di ERP</b> (menu Akun Meta → Brand), biaya iklan akun ini belum masuk / belum segar di laba:
       <ul><?php foreach ($bcPesan as $p) echo "<li>$p</li>"; ?></ul></div>
