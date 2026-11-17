@@ -96,7 +96,7 @@ if ($action === 'status_akun') {
 if ($action === 'status_total') {
     $v = json_decode((string) @file_get_contents('/var/lib/montera-status/validasi-total.json'), true) ?: [];
     $b = [];
-    foreach (['order', 'resi', 'omzet', 'dana', 'iklan', 'laba', 'stok', 'absensi'] as $k) { $x = $v['bagian'][$k] ?? null; if (!$x) continue;
+    foreach (['order', 'resi', 'omzet', 'dana', 'iklan', 'iklan_shopee', 'laba', 'stok', 'absensi'] as $k) {   // [iklan-shopee 17 Nov] + Iklan Shopee $x = $v['bagian'][$k] ?? null; if (!$x) continue;
         $b[$k] = ['nama' => $x['nama'], 'status' => $x['status'], 'teks' => $x['teks'], 'valid_sd' => $x['valid_sd'] ?? null, 'selisih' => (int) ($x['selisih'] ?? 0),
                   'rincian' => $k === 'iklan' ? array_slice($x['rincian'] ?? [], 0, 15) : [], 'catatan' => $k === 'iklan' ? array_values(array_filter($x['catatan'] ?? [])) : []]; }
     out(['dibuat' => $v['dibuat'] ?? null, 'bagian' => $b]);

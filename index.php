@@ -196,6 +196,15 @@ $public = [
     <div class="brand-warn" role="alert"><b>Cek akun Meta di ERP</b> (menu Akun Meta → Brand), biaya iklan akun ini belum masuk / belum segar di laba:
       <ul><?php foreach ($bcPesan as $p) echo "<li>$p</li>"; ?></ul></div>
 <?php endif; ?>
+<?php /* [iklan-shopee 17 Nov, Mufti] saldo iklan Shopee < biaya kemarin (1 hari penuh) → banner merah; data /root/shopee_ads_jam.php tiap jam */
+    $sa = json_decode((string)@file_get_contents('/var/lib/montera-status/shopee-ads.json'), true); $saK = [];
+    if (is_array($sa) && time() - strtotime((string)$sa['waktu']) < 3 * 3600) foreach ($sa['toko'] ?? [] as $t) if (!empty($t['saldo_kurang']))
+        $saK[] = htmlspecialchars((string)$t['nama']) . ': saldo <b>Rp' . number_format((float)$t['saldo'], 0, ',', '.') . '</b> &lt; biaya kemarin Rp' . number_format((float)$t['biaya_kemarin'], 0, ',', '.')
+            . ' (hari ini s/d ' . date('H:i', strtotime($sa['waktu'])) . ': Rp' . number_format((float)($t['hari_ini']['biaya'] ?? 0), 0, ',', '.') . ')';
+    if ($saK): ?>
+    <div class="brand-warn" role="alert" style="background:#B91C1C;color:#fff;border-color:#991B1B"><b>Saldo iklan Shopee hampir habis — iklan bisa berhenti.</b> Isi saldo di Seller Center → Iklan Shopee:
+      <ul><?php foreach ($saK as $p) echo "<li>$p</li>"; ?></ul></div>
+<?php endif; ?>
 <?php /* [validasi-harian] hasil validasi data iklan terakhir (cron 08:00, juga dikirim ke WA Mufti) */
     $vt = json_decode((string)@file_get_contents('/var/lib/montera-ads/validasi-terakhir.json'), true);
     if (is_array($vt)): ?>
