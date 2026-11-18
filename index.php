@@ -150,6 +150,7 @@ $public = [
       <button class="rail-btn" title="Winning content" data-goto="content"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM10 9l5 3-5 3z"/></svg></button>
       <button class="rail-btn" title="Rekap harian" data-goto="daily"><svg viewBox="0 0 24 24"><path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4M8 14h3M8 17h6"/></svg></button>
       <a class="rail-btn" title="Laporan Harian (Shopee x CPAS)" href="laporan.php"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></a>
+      <a class="rail-btn" title="Konten per Kreator (klasifikasi SOP)" href="kreator.php"><svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0"/></svg></a>
       <a class="rail-btn" title="Data Ads (input harian & akun CPAS)" href="data.php"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 9h16M9 9v11M13 13h4M13 16h4"/></svg></a>
     </nav>
     <nav class="rail-nav bottom">
@@ -204,6 +205,15 @@ $public = [
     if ($saK): ?>
     <div class="brand-warn" role="alert" style="background:#B91C1C;color:#fff;border-color:#991B1B"><b>Saldo iklan Shopee hampir habis — iklan bisa berhenti.</b> Isi saldo di Seller Center → Iklan Shopee:
       <ul><?php foreach ($saK as $p) echo "<li>$p</li>"; ?></ul></div>
+<?php endif; ?>
+<?php /* [kreator 18 Nov, Adila] iklan aktif baru tanpa kode kreator → peringatan (detail & set manual di kreator.php); cache 10 menit */
+    $krTk = null; $krF = __DIR__ . '/logs/kreator-tanpa-kode.json';
+    if (is_file($krF) && time() - filemtime($krF) < 600) $krTk = json_decode((string)@file_get_contents($krF), true);
+    if (!is_array($krTk)) { try { require_once __DIR__ . '/kreator_lib.php'; $krTk = array_slice(array_column(kr_tanpa_kode(kr_db()), 'ad_name'), 0, 200); @file_put_contents($krF, json_encode($krTk)); } catch (Throwable $e) { $krTk = []; } }
+    if ($krTk): ?>
+    <div class="brand-warn" role="alert"><b>Iklan tanpa kode kreator: <?= count($krTk) ?> iklan aktif baru.</b> Benerin naming-nya (kode kreator di belakang nomor konten, mis. <b>Stitch 04R</b>) atau set kreator manual:
+      <a href="kreator.php#tanpa-kode" style="font-weight:700">buka Konten per Kreator</a>
+      <span style="display:block;font-size:12px;opacity:.8;margin-top:4px"><?= htmlspecialchars(implode(' · ', array_slice(array_unique($krTk), 0, 8))) ?><?= count(array_unique($krTk)) > 8 ? ' …' : '' ?></span></div>
 <?php endif; ?>
 <?php /* [validasi-harian] hasil validasi data iklan terakhir (cron 08:00, juga dikirim ke WA Mufti) */
     $vt = json_decode((string)@file_get_contents('/var/lib/montera-ads/validasi-terakhir.json'), true);
