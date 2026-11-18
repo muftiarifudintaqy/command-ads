@@ -31,17 +31,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' || ($UJI && getenv('KREATOR_PO
     $kini = date('Y-m-d H:i:s');
     try {
         $aksi = (string)($in['aksi'] ?? '');
-        if ($aksi === 'set') {
-            $lv = (string)($in['level'] ?? '');
-            if (!in_array($lv, ['ad', 'konten', 'campaign'], true)) $jawab(['ok' => false, 'pesan' => 'Level tidak valid']);
-            $kunci = trim((string)($in['kunci'] ?? '')); $label = mb_substr(trim((string)($in['label'] ?? '')), 0, 500);
+        // satu baris set manual (dipakai set satu-satu & set banyak sekaligus); FALSE = kunci tidak valid
+        $simpan = function (string $lv, string $kunci, string $label, ?int $kid, ?string $baru) use ($db, $user, $kini) {
+            if (!in_array($lv, ['ad', 'konten', 'campaign'], true)) return FALSE;
+            $kunci = trim($kunci); $label = mb_substr(trim($label), 0, 500);
             if ($lv === 'konten') $kunci = kr_konten_kunci($kunci);
-            if ($kunci === '' || $kunci === kr_konten_kunci('(tanpa naming)') || ($lv !== 'konten' && !preg_match('/^\d{5,32}$/', $kunci))) $jawab(['ok' => false, 'pesan' => 'Iklan / konten / campaign tidak valid']);
-            $kid = ($in['kreator_id'] ?? '') === '' || $in['kreator_id'] === null ? null : (int)$in['kreator_id'];
-            $baru = null;
-            if ($kid !== null) { $q = $db->prepare("SELECT nama FROM kreator WHERE id = ? AND aktif = 1"); $q->execute([$kid]); $baru = $q->fetchColumn(); if ($baru === false) $jawab(['ok' => false, 'pesan' => 'Kreator tidak ditemukan']); }
+            if ($kunci === '' || $kunci === kr_konten_kunci('(tanpa naming)') || ($lv !== 'konten' && !preg_match('/^\d{5,32}$/', $kunci))) return FALSE;
             $md5 = md5($kunci);
-            $db->beginTransaction();
             $q = $db->prepare("SELECT k.nama FROM kreator_manual m LEFT JOIN kreator k ON k.id = m.kreator_id WHERE m.level = ? AND m.kunci_md5 = ? FOR UPDATE"); $q->execute([$lv, $md5]);
             $lama = $q->fetchColumn();
             $db->prepare("INSERT INTO kreator_manual (level, kunci, kunci_md5, label, kreator_id, oleh, waktu) VALUES (?,?,?,?,?,?,?)
@@ -49,8 +45,18 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' || ($UJI && getenv('KREATOR_PO
                ->execute([$lv, $kunci, $md5, $label, $kid, $user, $kini]);
             $db->prepare("INSERT INTO kreator_log (jenis, level, kunci, label, lama, baru, oleh, waktu) VALUES ('manual',?,?,?,?,?,?,?)")
                ->execute([$lv, $kunci, $label, $lama ?: '(otomatis)', $baru ?: '(otomatis)', $user, $kini]);
+            return TRUE;
+        };
+        if ($aksi === 'set' || $aksi === 'set_banyak') {
+            $kid = ($in['kreator_id'] ?? '') === '' || $in['kreator_id'] === null ? null : (int)$in['kreator_id'];
+            $baru = null;
+            if ($kid !== null) { $q = $db->prepare("SELECT nama FROM kreator WHERE id = ? AND aktif = 1"); $q->execute([$kid]); $baru = $q->fetchColumn(); if ($baru === false) $jawab(['ok' => false, 'pesan' => 'Kreator tidak ditemukan']); }
+            $item = $aksi === 'set' ? [['level' => $in['level'] ?? '', 'kunci' => $in['kunci'] ?? '', 'label' => $in['label'] ?? '']] : (array)($in['item'] ?? []);
+            if (!$item || count($item) > 500) $jawab(['ok' => false, 'pesan' => 'Pilih 1-500 iklan/konten']);
+            $db->beginTransaction();
+            foreach ($item as $it) if (!$simpan((string)($it['level'] ?? ''), (string)($it['kunci'] ?? ''), (string)($it['label'] ?? ''), $kid, $baru ?: null)) { $db->rollBack(); $jawab(['ok' => false, 'pesan' => 'Iklan / konten / campaign tidak valid: ' . mb_substr((string)($it['label'] ?? ''), 0, 60)]); }
             $db->commit();
-            $jawab(['ok' => true, 'pesan' => ($baru ? 'Disimpan: ' . $baru : 'Dikembalikan ke baca otomatis') . '.']);
+            $jawab(['ok' => true, 'pesan' => ($baru ? 'Disimpan: ' . $baru : 'Dikembalikan ke baca otomatis') . (count($item) > 1 ? ' (' . count($item) . ' konten/iklan)' : '') . '.']);
         }
         if ($aksi === 'kode') {
             $kode = strtoupper(trim((string)($in['kode'] ?? ''))); $nama = mb_substr(trim((string)($in['nama'] ?? '')), 0, 60); $aktif = empty($in['aktif']) ? 0 : 1;
@@ -105,6 +111,7 @@ $jmlIklan = count($iklan);
 if ($per === 'konten') $iklan = kr_per_konten($iklan);
 $semuaKreator = [];
 foreach ($iklan as $a) $semuaKreator[$a['kreator']['nama']] = true;
+$semuaBaris = $iklan;   // sebelum filter kreator (halaman Belum ada kreator & validasi)
 if ($fk !== '') $iklan = array_values(array_filter($iklan, function ($a) use ($fk) { return $a['kreator']['nama'] === $fk; }));
 
 // rekap per kreator: urut kreator terdaftar (abjad), lalu kode tidak dikenal, terakhir "Belum ada kode"
@@ -129,6 +136,26 @@ $SUMBER = ['manual-iklan' => 'manual (iklan ini)', 'manual-konten' => 'manual (k
 $roasTxt = function (float $sp, float $om) { return $sp > 0 ? number_format($om / $sp, 2, ',', '.') : '–'; };
 $q = function (array $x) use ($pr, $dari, $sampai, $merek, $fk, $per) { return '?' . http_build_query(array_merge(['p' => $pr, 'dari' => $dari, 'sampai' => $sampai, 'merek' => $merek, 'kreator' => $fk, 'per' => $per], $x)); };
 $aktifK = array_values(array_filter($daftar, function ($k) { return (int)$k['aktif'] === 1; }));
+$hal = ($G['hal'] ?? '') === 'belum' ? 'belum' : 'rekap';
+$tk = !empty($G['tk']);   // Belum ada kreator: ikut tampilkan kode tidak dikenal
+$belum = array_values(array_filter($semuaBaris, function ($a) use ($tk) { return $a['kreator']['sumber'] === 'belum' || ($tk && $a['kreator']['sumber'] === 'tidak-dikenal'); }));
+$nBelum = count(array_filter($semuaBaris, function ($a) { return $a['kreator']['sumber'] === 'belum'; }));
+$winPlus = $total['kat']['WINNING'] + $total['kat']['TOP WINNING'];
+$val = kr_validasi($db, $dari, $sampai, $merek);
+$jamTarik = kr_jam_tarik($db);
+// penyebab baris akun × tanggal yang tidak sama
+$pindah = []; foreach ($val['beda'] as $b) $pindah[$b['merek'] . '|' . $b['tanggal']][] = $b['pu_i'] - $b['pu_a'];
+$sebab = function (array $b) use ($pindah, $kemarin) {
+    $o = []; $dsp = $b['sp_i'] - $b['sp_a']; $dpu = $b['pu_i'] - $b['pu_a'];
+    if (round($dsp) != 0) $o[] = abs($dsp) < 1000 && $b['tanggal'] >= date('Y-m-d', strtotime('-2 day', strtotime($kemarin)))
+        ? 'spend selisih kecil: level iklan & level akun ditarik beda menit, data hari itu masih berubah di Meta (sinkron berikutnya menyamakan)'
+        : ($dsp < 0 ? 'ada iklan yang belum tertarik di level iklan (kurang ' . rp(-$dsp) . ') — tarik ulang data' : 'spend level iklan lebih besar ' . rp($dsp) . ' — tarik ulang data');
+    if ($dpu != 0 || round($b['om_i']) != round($b['om_a'])) $o[] = in_array(-$dpu, $pindah[$b['merek'] . '|' . $b['tanggal']] ?? [], true) && $dpu != 0
+        ? 'purchase/omset dihitung Meta di akun lain pada tanggal yang sama (atribusi CPAS lintas akun; total brand tetap)'
+        : 'purchase/omset level iklan ≠ level akun (atribusi Meta)';
+    return implode(' · ', $o);
+};
+if (($G['export'] ?? '') === 'xlsx') { require __DIR__ . '/kreator_xlsx.php'; exit; }
 ?><!DOCTYPE html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Konten per Kreator</title>
@@ -168,6 +195,26 @@ a.jml.nol{background:#f1f5f9!important;color:#cbd5e1;pointer-events:none}
 .set button{height:30px;padding:0 10px;font-size:12.5px}
 #pesan{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 16px;border-radius:10px;display:none;z-index:9}
 .chip-f{display:inline-flex;gap:6px;align-items:center;background:#eef2ff;color:#3730a3;border-radius:999px;padding:4px 10px;font-size:12.5px;font-weight:600}
+/* [kreator 18 Nov] tab, kartu ringkasan, validasi, halaman Belum ada kreator */
+.tab{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
+.tab a{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--text);text-decoration:none;font-weight:600}
+.tab a.on{background:var(--text);color:#fff;border-color:var(--text)}
+.tab a.ekspor{margin-left:auto;background:#16a34a;color:#fff;border-color:#16a34a}
+.tab .bdg{background:#fee2e2;color:#b91c1c;border-radius:999px;padding:0 8px;font-size:12px}
+.tab a.on .bdg{background:#fff;color:#b91c1c}
+.ring{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:0 0 14px}
+.ring a,.ring div{display:block;background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;text-decoration:none;color:var(--text);box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.ring b{display:block;font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:4px}
+.ring span{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+.ring a.win{border-top:3px solid #16a34a}
+.ok{color:#15803d;font-weight:700}.no{color:#b91c1c;font-weight:700}
+.val-baris{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:13.5px}
+.val-baris .pil{display:inline-flex;flex-wrap:wrap;gap:4px 6px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:6px 10px;background:#fafbfd;max-width:100%;white-space:normal}
+.bulk{position:sticky;bottom:12px;z-index:4;display:none;align-items:center;gap:10px;flex-wrap:wrap;background:#0f172a;color:#fff;border-radius:12px;padding:10px 14px;margin-top:10px}
+.bulk.ada{display:flex}
+.bulk select{height:34px}
+@media (max-width:900px){.ring{grid-template-columns:repeat(2,minmax(0,1fr))}.tab a.ekspor{margin-left:0}}
+@media (max-width:500px){.ring b{font-size:16px;overflow-wrap:anywhere}.ring a,.ring div{padding:12px}.val-baris input#cari{min-width:0;width:100%}}
 @media (max-width:700px){.atas{padding:10px 14px}.isi{padding:12px 14px 50px}.atas .kanan{margin-left:0;width:100%}}
 </style></head><body>
 <div class="atas">
@@ -175,8 +222,13 @@ a.jml.nol{background:#f1f5f9!important;color:#cbd5e1;pointer-events:none}
   <span class="kanan">Masuk sebagai <b><?= e($user) ?></b> · data Meta level iklan (tanpa pajak), periode <?= e(date('d/m/Y', strtotime($dari))) ?> – <?= e(date('d/m/Y', strtotime($sampai))) ?></span>
 </div>
 <div class="isi">
+<nav class="tab">
+  <a href="<?= e($q(['hal' => 'rekap'])) ?>" class="<?= $hal === 'rekap' ? 'on' : '' ?>">Rekap per kreator</a>
+  <a href="<?= e($q(['hal' => 'belum'])) ?>" class="<?= $hal === 'belum' ? 'on' : '' ?>">Belum ada kreator <span class="bdg"><?= $nBelum ?></span></a>
+  <a class="ekspor" href="<?= e($q(['hal' => $hal, 'export' => 'xlsx', 'tk' => $tk ? 1 : null])) ?>">⬇ Export Excel</a>
+</nav>
 
-<?php if ($tanpaKode): ?>
+<?php if ($tanpaKode && $hal === 'rekap'): ?>
 <div class="kartu peringatan" id="tanpa-kode">
   <h2>⚠️ Iklan tanpa kode kreator: <?= count($tanpaKode) ?> iklan aktif baru</h2>
   <p class="ket" style="margin:0 0 8px">Iklan yang mulai belanja 7 hari terakhir dan masih belanja kemarin/hari ini, tapi nama iklannya tanpa kode kreator (format <b>&lt;seri&gt; &lt;nomor&gt;&lt;KODE&gt;</b>, mis. <b>Stitch 04R</b>). Benerin naming-nya di Ads Manager, atau set kreatornya manual di bawah.</p>
@@ -201,12 +253,46 @@ a.jml.nol{background:#f1f5f9!important;color:#cbd5e1;pointer-events:none}
     <label>Kreator<select name="kreator"><option value="">Semua</option>
       <?php foreach (array_keys($semuaKreator + ($fk !== '' ? [$fk => true] : [])) as $n): ?><option <?= $fk === $n ? 'selected' : '' ?>><?= e($n) ?></option><?php endforeach; ?></select></label>
     <label>Hitung per<select name="per"><option value="konten" <?= $per === 'konten' ? 'selected' : '' ?>>Konten (iklan bernama sama digabung)</option><option value="iklan" <?= $per === 'iklan' ? 'selected' : '' ?>>Iklan (ad ID, = Ads Manager)</option></select></label>
+    <input type="hidden" name="hal" value="<?= e($hal) ?>">
+    <?php if ($hal === 'belum'): ?><label style="flex-direction:row;align-items:center;gap:6px;height:36px"><input type="checkbox" name="tk" value="1" <?= $tk ? 'checked' : '' ?> style="height:auto"> ikut kode tidak dikenal</label><?php endif; ?>
     <button type="submit">Tampilkan</button>
   </form>
   <p class="ket" style="margin:10px 0 0">Kategori per konten (level iklan) dari Amount Spent &amp; Purchase ROAS periode yang sama:
     <?= $per === 'konten' ? 'konten = semua iklan dengan nama konten sama (varian B2/B3, Copy, Shopee/VATC digabung, sama dengan sheet Naming) · ' : '' ?>spent &lt; 1 jt → ROAS &lt; 3 <b>Testing</b>, 3–&lt;8 <b>Opportunity</b>, ≥ 8 <b>High Potential</b> ·
     spent ≥ 1 jt → ROAS &lt; 2 <b>Not Performing</b>, 2–&lt;3 <b>Performing</b>, ≥ 3 <b>Winning</b> (spent 1–5 jt) / <b>Top Winning</b> (&gt; 5 jt).
     Omset &amp; purchase = katalog CPAS (shared items), atribusi 7 hari klik / 1 hari lihat. Hanya iklan yang belanja di periode ini (<?= number_format($jmlIklan, 0, ',', '.') ?> iklan<?= $per === 'konten' ? ' → ' . number_format(count($iklan), 0, ',', '.') . ' konten' : '' ?>).</p>
+</div>
+
+<?php if ($hal === 'rekap'): ?>
+<div class="ring">
+  <a href="#daftar" class="jml-kartu" data-k="" data-c=""><span>Konten</span><b><?= number_format($total['jml'], 0, ',', '.') ?></b></a>
+  <div><span>Spent</span><b><?= rp($total['spend']) ?></b></div>
+  <div><span>Omset</span><b><?= rp($total['omset']) ?></b></div>
+  <div><span>ROAS</span><b><?= $roasTxt($total['spend'], $total['omset']) ?></b></div>
+  <a href="#daftar" class="win jml-kartu" data-k="" data-c="WINNING|TOP WINNING"><span>Winning + Top Winning</span><b><?= $winPlus ?></b></a>
+</div>
+
+<?php /* validasi: total semua iklan (dasar klasifikasi) = total level akun Meta (Ads Manager) */ $v = $val; $ik = function ($t) { return $t['ok'] ? '<span class="ok">✅</span>' : '<span class="no">❌</span>'; };
+  $sel = function (float $a, float $b, bool $rp = true) { $d = $a - $b; return round($d) == 0 ? '' : ' <span class="no">(' . ($d > 0 ? '+' : '−') . ($rp ? rp(abs($d)) : number_format(abs($d), 0, ',', '.')) . ')</span>'; }; ?>
+<div class="kartu" id="validasi">
+  <h2><?= $v['ok'] ? '✅' : '❌' ?> Validasi: total semua kreator = total Ads Manager (level akun) <span class="ket" style="font-weight:400">· data ditarik <?= $jamTarik ? e(date('d/m H:i', strtotime($jamTarik))) : '-' ?></span></h2>
+  <div class="val-baris">
+    <?php foreach ($v['brand'] + ['_' => $v['total']] as $t): ?>
+    <span class="pil"><?= $ik($t) ?> <b><?= e($t['nama']) ?></b> spent <?= rp($t['sp_i']) ?><?= $sel($t['sp_i'], $t['sp_a']) ?> · omset <?= rp($t['om_i']) ?><?= $sel($t['om_i'], $t['om_a']) ?> · purchase <?= number_format($t['pu_i'], 0, ',', '.') ?><?= $sel((float)$t['pu_i'], (float)$t['pu_a'], false) ?></span>
+    <?php endforeach; ?>
+  </div>
+  <p class="ket" style="margin:8px 0 0">Kiri = jumlah semua iklan (dasar klasifikasi), angka merah dalam kurung = selisih terhadap total akun yang sama dari Meta. Spend tanpa pajak.</p>
+  <details style="margin-top:8px" <?= $v['ok'] ? '' : 'open' ?>><summary style="cursor:pointer;font-weight:600">Per akun (<?= count(array_filter($v['akun'], function ($a) { return !$a['ok']; })) ?> tidak cocok dari <?= count($v['akun']) ?>)</summary>
+  <div class="tabel" style="max-height:360px;overflow:auto;margin-top:8px"><table><thead><tr><th></th><th>Akun</th><th>Brand</th><th class="n">Spent iklan</th><th class="n">Spent akun</th><th class="n">Omset iklan</th><th class="n">Omset akun</th><th class="n">Purchase iklan</th><th class="n">Purchase akun</th></tr></thead><tbody>
+  <?php foreach ($v['akun'] as $t): ?><tr><td><?= $ik($t) ?></td><td><?= e($t['nama']) ?></td><td><?= e(ucfirst((string)$t['merek'])) ?></td><td class="n"><?= rp($t['sp_i']) ?></td><td class="n"><?= rp($t['sp_a']) ?></td><td class="n"><?= rp($t['om_i']) ?></td><td class="n"><?= rp($t['om_a']) ?></td><td class="n"><?= $t['pu_i'] ?></td><td class="n"><?= $t['pu_a'] ?></td></tr><?php endforeach; ?>
+  </tbody></table></div>
+  <?php if ($v['beda']): ?>
+  <h2 style="margin:12px 0 6px;font-size:14px">Penyebab (akun × tanggal yang tidak sama)</h2>
+  <div class="tabel"><table><thead><tr><th>Akun</th><th>Tanggal</th><th class="n">Selisih spent</th><th class="n">Selisih omset</th><th class="n">Selisih purchase</th><th>Penyebab</th></tr></thead><tbody>
+  <?php foreach ($v['beda'] as $b): ?><tr><td><?= e($b['nama']) ?></td><td><?= e(date('d/m', strtotime($b['tanggal']))) ?></td><td class="n"><?= rp($b['sp_i'] - $b['sp_a']) ?></td><td class="n"><?= rp($b['om_i'] - $b['om_a']) ?></td><td class="n"><?= $b['pu_i'] - $b['pu_a'] ?></td><td style="white-space:normal;min-width:280px"><?= e($sebab($b)) ?></td></tr><?php endforeach; ?>
+  </tbody></table></div>
+  <?php endif; ?>
+  </details>
 </div>
 
 <div class="kartu">
@@ -243,7 +329,7 @@ a.jml.nol{background:#f1f5f9!important;color:#cbd5e1;pointer-events:none}
         <?php endif; ?>
         <td><b><?= e($kr['nama']) ?></b><br><span class="sumber"><?= e($SUMBER[$kr['sumber']]) ?><?= $kr['oleh'] ? ' · ' . e($kr['oleh']) . ' ' . e(date('d/m H:i', strtotime((string)$kr['waktu']))) : '' ?></span></td>
         <td><span class="kat" style="background:<?= $WARNA[$a['kategori']] ?>"><?= e($a['kategori']) ?></span></td>
-        <td class="n"><?= rp($a['spend']) ?></td><td class="n"><?= rp($a['omset']) ?></td><td class="n"><?= number_format($a['roas'], 2, ',', '.') ?></td>
+        <td class="n"><?= rp($a['spend']) ?></td><td class="n"><?= rp($a['omset']) ?></td><td class="n"><?= (is_infinite($a['roas']) ? '∞' : number_format($a['roas'], 2, ',', '.')) ?></td>
         <td class="n"><?= number_format($a['purch'], 0, ',', '.') ?></td><td class="n"><?= $a['cpa'] !== null ? rp($a['cpa']) : '–' ?></td>
         <td class="nama-iklan" title="<?= e($a['campaign_name']) ?>"><?= e($a['campaign_name']) ?><br><span class="sumber"><?= e(ucfirst((string)$a['merek'])) ?> · <?= e($a['akun']) ?></span></td>
         <td><div class="set" data-ad="<?= $per === 'iklan' ? e($a['ad_id']) : '' ?>" data-nama="<?= e($a['ad_name']) ?>" data-kk="<?= e($a['konten']) ?>" data-cmp="<?= e($a['campaign_id']) ?>" data-cmpn="<?= e($a['campaign_name']) ?>"></div></td>
@@ -252,7 +338,7 @@ a.jml.nol{background:#f1f5f9!important;color:#cbd5e1;pointer-events:none}
     </tbody></table></div>
 </div>
 
-<div class="kartu">
+<div class="kartu" id="kode">
   <h2>Kode kreator</h2>
   <p class="ket" style="margin:-4px 0 10px">Kode = huruf yang menempel di belakang nomor konten di akhir nama iklan (mis. <b>04R</b> → R). Kode nonaktif tidak dibaca.</p>
   <div class="tabel"><table><thead><tr><th>Kode</th><th>Nama kreator</th><th>Aktif</th><th>Diubah</th><th></th></tr></thead><tbody>
@@ -277,6 +363,37 @@ a.jml.nol{background:#f1f5f9!important;color:#cbd5e1;pointer-events:none}
   <?php if (!$riwayat): ?><tr><td colspan="4" class="ket">Belum ada perubahan.</td></tr><?php endif; ?>
   </tbody></table></div>
 </div>
+<?php else: /* ===== halaman Belum ada kreator ===== */ ?>
+<div class="kartu">
+  <h2>Belum ada kreator: <?= count($belum) ?> <?= $per === 'konten' ? 'konten' : 'iklan' ?></h2>
+  <p class="ket" style="margin:-4px 0 10px">Iklan tanpa kode kreator di nama & belum di-set manual<?= $tk ? ', plus kode yang belum terdaftar' : '' ?>. Centang lalu pilih kreator → <b>Set</b> (tercatat siapa &amp; kapan). Periode, brand &amp; hitung per mengikuti filter di atas.</p>
+  <div class="val-baris" style="margin-bottom:10px">
+    <input id="cari" type="search" placeholder="Cari nama iklan / campaign / akun…" style="min-width:260px;flex:1">
+    <select id="fAkun"><option value="">Semua akun</option><?php $akunDari = function ($a) { return isset($a['iklan']) ? array_values(array_unique(array_column($a['iklan'], 'akun'))) : [$a['akun']]; };
+      $ak = []; foreach ($belum as $a) foreach ($akunDari($a) as $x) $ak[$x] = 1; $ak = array_keys($ak); sort($ak); foreach ($ak as $x): ?><option><?= e($x) ?></option><?php endforeach; ?></select>
+    <select id="fAktif"><option value="">Aktif &amp; tidak</option><option value="1">Aktif</option><option value="0">Tidak aktif</option></select>
+    <select id="fUrut"><option value="sp">Urut spent terbesar</option><option value="sp-">Urut spent terkecil</option><option value="mulai">Urut mulai tayang terbaru</option></select>
+  </div>
+  <div class="tabel"><table id="tblBelum">
+    <thead><tr><th><input type="checkbox" id="semua" style="height:auto"></th><th><?= $per === 'konten' ? 'Konten' : 'Iklan' ?></th><th>Campaign</th><th>Akun</th><th>Brand</th><th>Mulai tayang</th><th>Status</th><th class="n">Spent</th><th class="n">Omset</th><th class="n">ROAS</th><th class="n">Purchase</th></tr></thead>
+    <tbody>
+    <?php foreach ($belum as $a): $aktif = $a['status'] === 'ACTIVE'; $kk = $per === 'konten' ? $a['konten'] : $a['ad_id']; ?>
+      <tr data-cari="<?= e(mb_strtolower($a['ad_name'] . ' ' . $a['campaign_name'] . ' ' . $a['akun'] . ' ' . implode(' ', array_column($a['iklan'] ?? [], 'ad_name')))) ?>" data-akun="|<?= e(implode('|', $akunDari($a))) ?>|" data-aktif="<?= $aktif ? 1 : 0 ?>" data-sp="<?= round($a['spend']) ?>" data-mulai="<?= e((string)$a['mulai']) ?>">
+        <td><input type="checkbox" class="pilih" style="height:auto" data-level="<?= $per === 'konten' ? 'konten' : 'ad' ?>" data-kunci="<?= e($kk) ?>" data-label="<?= e($a['ad_name']) ?>"></td>
+        <td class="nama-iklan" title="<?= e($a['ad_name']) ?>"><?= e($a['ad_name']) ?><?= $per === 'konten' ? ' <span class="sumber">· ' . count($a['iklan']) . ' iklan</span>' : '' ?><?= $a['kreator']['sumber'] === 'tidak-dikenal' ? ' <span class="sumber">· ' . e($a['kreator']['nama']) . '</span>' : '' ?></td>
+        <td class="nama-iklan" title="<?= e($a['campaign_name']) ?>"><?= e($a['campaign_name']) ?></td><td title="<?= e(implode(', ', $akunDari($a))) ?>"><?= e($a['akun']) ?></td><td><?= e(ucfirst((string)$a['merek'])) ?></td>
+        <td><?= $a['mulai'] ? e(date('d/m/Y', strtotime($a['mulai']))) : '-' ?></td><td><?= $aktif ? '<span class="ok">Aktif</span>' : e(kr_status_teks($a['status'])) ?></td>
+        <td class="n"><?= rp($a['spend']) ?></td><td class="n"><?= rp($a['omset']) ?></td><td class="n"><?= (is_infinite($a['roas']) ? '∞' : number_format($a['roas'], 2, ',', '.')) ?></td><td class="n"><?= number_format($a['purch'], 0, ',', '.') ?></td>
+      </tr>
+    <?php endforeach; ?>
+    <?php if (!$belum): ?><tr><td colspan="11" class="ket">Semua konten di periode ini sudah punya kreator. 🎉</td></tr><?php endif; ?>
+    </tbody></table></div>
+  <p class="ket" style="margin:8px 0 0">Mulai tayang = tanggal pertama belanja (data sejak 01/09/2026). Status dari Meta (diperbarui tiap ±10 menit).</p>
+  <div class="bulk" id="bulk"><b id="nPilih">0 dipilih</b>
+    <select id="bulkK"><option value="">— pilih kreator —</option><?php foreach ($aktifK as $k): ?><option value="<?= (int)$k['id'] ?>"><?= e($k['nama']) ?> (<?= e($k['kode']) ?>)</option><?php endforeach; ?></select>
+    <button id="bulkSet" style="background:#16a34a;border-color:#16a34a">Set kreator</button><button id="bulkBatal" class="abu">Batal</button></div>
+</div>
+<?php endif; ?>
 </div>
 <div id="pesan"></div>
 <script>
@@ -315,11 +432,38 @@ document.querySelectorAll('.simpan-kode').forEach((b) => b.onclick = async () =>
   } catch (e) { pesan('Gagal: ' + e.message); } finally { b.disabled = false; }
 });
 if (location.hash === '#tanpa-kode' && document.getElementById('dTk')) document.getElementById('dTk').open = true;
-// klik angka rekap → saring daftar konten
-document.querySelectorAll('a.jml').forEach((a) => a.onclick = () => {
-  const k = a.dataset.k, c = a.dataset.c; let n = 0;
-  document.querySelectorAll('#tblIklan tbody tr').forEach((tr) => { const ok = (!k || tr.dataset.k === k) && (!c || tr.dataset.c === c); tr.style.display = ok ? '' : 'none'; if (ok) n++; });
+// klik angka rekap / kartu → saring daftar konten (c boleh beberapa kategori dipisah |)
+document.querySelectorAll('a.jml, a.jml-kartu').forEach((a) => a.onclick = () => {
+  const k = a.dataset.k, c = a.dataset.c, cs = c ? c.split('|') : []; let n = 0;
+  document.querySelectorAll('#tblIklan tbody tr').forEach((tr) => { const ok = (!k || tr.dataset.k === k) && (!cs.length || cs.includes(tr.dataset.c)); tr.style.display = ok ? '' : 'none'; if (ok) n++; });
+  setTimeout(() => document.getElementById('daftar').scrollIntoView({ behavior: 'smooth' }), 0);
   document.getElementById('judulF').innerHTML = (k || c) ? `<span class="chip-f">${[k, c].filter(Boolean).join(' · ')} · ${n} konten <a href="#daftar" onclick="document.querySelectorAll('#tblIklan tbody tr').forEach(t=>t.style.display='');this.parentNode.remove();return false" style="color:inherit">✕</a></span>` : '';
 });
+// halaman Belum ada kreator: cari, saring akun/aktif, urut, centang banyak → set kreator sekali klik
+(function () {
+  const tb = document.querySelector('#tblBelum tbody'); if (!tb) return;
+  const rows = [...tb.querySelectorAll('tr[data-cari]')], cari = document.getElementById('cari'), fA = document.getElementById('fAkun'), fS = document.getElementById('fAktif'), fU = document.getElementById('fUrut');
+  const bulk = document.getElementById('bulk'), nP = document.getElementById('nPilih');
+  function saring() {
+    const t = cari.value.trim().toLowerCase(), a = fA.value, s = fS.value, u = fU.value;
+    rows.sort((x, y) => u === 'mulai' ? (y.dataset.mulai || '').localeCompare(x.dataset.mulai || '') : (u === 'sp-' ? x.dataset.sp - y.dataset.sp : y.dataset.sp - x.dataset.sp)).forEach((r) => tb.appendChild(r));
+    rows.forEach((r) => { const ok = (!t || r.dataset.cari.includes(t)) && (!a || r.dataset.akun.includes('|' + a + '|')) && (s === '' || r.dataset.aktif === s); r.style.display = ok ? '' : 'none'; if (!ok) r.querySelector('.pilih').checked = false; });
+    hitung();
+  }
+  function dipilih() { return rows.filter((r) => r.style.display !== 'none' && r.querySelector('.pilih').checked).map((r) => r.querySelector('.pilih')); }
+  function hitung() { const n = dipilih().length; nP.textContent = n + ' dipilih'; bulk.classList.toggle('ada', n > 0); }
+  [cari, fA, fS, fU].forEach((el) => el.addEventListener('input', saring));
+  tb.addEventListener('change', hitung);
+  document.getElementById('semua').onchange = (e) => { rows.forEach((r) => { if (r.style.display !== 'none') r.querySelector('.pilih').checked = e.target.checked; }); hitung(); };
+  document.getElementById('bulkBatal').onclick = () => { rows.forEach((r) => r.querySelector('.pilih').checked = false); document.getElementById('semua').checked = false; hitung(); };
+  document.getElementById('bulkSet').onclick = async (e) => {
+    const k = document.getElementById('bulkK').value, p = dipilih(); if (!k) { pesan('Pilih kreator dulu'); return; } if (!p.length) return;
+    if (!confirm('Set ' + p.length + ' konten/iklan ke ' + document.getElementById('bulkK').selectedOptions[0].text + '?')) return;
+    e.target.disabled = true;
+    try { const j = await kirim({ aksi: 'set_banyak', kreator_id: k, item: p.map((c) => ({ level: c.dataset.level, kunci: c.dataset.kunci, label: c.dataset.label })) });
+      pesan(j.pesan || (j.ok ? 'Tersimpan' : 'Gagal')); if (j.ok) setTimeout(() => location.reload(), 800); } catch (er) { pesan('Gagal: ' + er.message); } finally { e.target.disabled = false; }
+  };
+  saring();
+})();
 </script>
 </body></html>

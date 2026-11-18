@@ -132,7 +132,8 @@ function level_params(string $level): array {
     $p = ['level' => $level, 'time_increment' => 1, 'action_attribution_windows' => $ATTR];
     if ($level === 'ad') {
         $p['fields'] = "ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name," . ($bag === 'spend' ? 'spend,impressions,frequency' : ($bag === 'konv' ? "inline_link_clicks,$conv" : "spend,impressions,inline_link_clicks,frequency,$conv"));
-        $p['filtering'] = [['field' => 'ad.effective_status', 'operator' => 'IN', 'value' => ['ACTIVE', 'PAUSED', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED', 'ARCHIVED', 'PENDING_REVIEW', 'DISAPPROVED', 'PREAPPROVED', 'PENDING_BILLING_INFO', 'IN_PROCESS', 'WITH_ISSUES']]];
+        // [kreator-validasi 18 Nov] TANPA filter status iklan: filter ad.effective_status membuat Meta membuang sebagian iklan ACTIVE
+        // (Selow GCR 0110 "reskirustan 24" 13-18 Nov hilang → total iklan < total akun). Tanpa filter = semua iklan, total = level akun.
     } elseif ($level === 'campaign') {
         $p['fields'] = 'campaign_id,' . ($bag === 'spend' ? 'spend,impressions' : ($bag === 'konv' ? "inline_link_clicks,$conv" : "spend,impressions,inline_link_clicks,$conv"));
         $p['filtering'] = [['field' => 'campaign.effective_status', 'operator' => 'IN', 'value' => ['ACTIVE', 'PAUSED']]];
