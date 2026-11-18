@@ -206,6 +206,12 @@ $public = [
     <div class="brand-warn" role="alert" style="background:#B91C1C;color:#fff;border-color:#991B1B"><b>Saldo iklan Shopee hampir habis — iklan bisa berhenti.</b> Isi saldo di Seller Center → Iklan Shopee:
       <ul><?php foreach ($saK as $p) echo "<li>$p</li>"; ?></ul></div>
 <?php endif; ?>
+<?php /* [isi-otomatis 18 Nov, Mufti] toko dengan isi saldo otomatis aktif: tidak alarm, cukup info kecil saldo */
+    $saI = []; if (is_array($sa) && time() - strtotime((string)$sa['waktu']) < 3 * 3600) foreach ($sa['toko'] ?? [] as $t) if (!empty($t['isi_otomatis']) && isset($t['saldo']))
+        $saI[] = htmlspecialchars((string)$t['nama']) . ' Rp' . number_format((float)$t['saldo'], 0, ',', '.');
+    if ($saI): ?>
+    <div style="font-size:12.5px;color:#64748b;margin:0 0 10px">Saldo iklan Shopee: <?= implode(' · ', $saI) ?> · isi otomatis aktif (dicek <?= htmlspecialchars(date('H:i', strtotime($sa['waktu']))) ?>)</div>
+<?php endif; ?>
 <?php /* [kreator 18 Nov, Adila] iklan aktif baru tanpa kode kreator → peringatan (detail & set manual di kreator.php); cache 10 menit */
     $krTk = null; $krF = __DIR__ . '/logs/kreator-tanpa-kode.json';
     if (is_file($krF) && time() - filemtime($krF) < 600) $krTk = json_decode((string)@file_get_contents($krF), true);
