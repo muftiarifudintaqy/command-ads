@@ -635,3 +635,10 @@ td.warnt{color:#92400e;background:#fffbeb;font-size:12px}
 .status-total .st-extra a{color:#92400e}
 .status-total .st-extra ul{margin:4px 0 0 18px;padding:0}
 .status-total .st-extra details{margin-top:4px}
+/* [cepat 19 Nov, Mufti] skeleton selama memuat: tidak menampilkan Rp0 / "Belum ada spend" */
+tr.skel td{padding:12px 8px}
+.sk{display:block;height:10px;width:70%;border-radius:5px;background:linear-gradient(90deg,#eef0f3 25%,#e2e5ea 50%,#eef0f3 75%);background-size:200% 100%;animation:skel 1.2s infinite linear}
+.sk.sm{width:40%;height:8px;margin-top:6px}
+@keyframes skel{0%{background-position:200% 0}100%{background-position:-200% 0}}
+body.memuat .acc-m b,body.memuat .funnels b{color:transparent !important;background:#e5e7eb;border-radius:4px;animation:skel 1.2s infinite linear;background-image:linear-gradient(90deg,#eef0f3 25%,#e2e5ea 50%,#eef0f3 75%);background-size:200% 100%}
+tr.lanjut td{color:#64748b;font-size:12.5px}

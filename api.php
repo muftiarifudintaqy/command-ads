@@ -261,10 +261,16 @@ function out_gz(array $x): void {   // respon besar (sebulan data iklan) → gzi
     echo $j; exit;
 }
 if ($action === 'local') {
+    // [cepat 19 Nov, Mufti] ringkas=1 (rentang ≥ 3 hari): level iklan & campaign = 1 baris JUMLAH per periode (tanggal = from), total sama persis;
+    //   harian per akun tetap per tanggal (Rekap harian), harian campaign per akun (campday) untuk spend sumber "campaign".
+    //   Rincian harian per iklan/campaign diambil saat perlu lewat action=local_hari (panel tren, rekap harian dengan pencarian, Montera AI).
+    // sv = {act_id: diambil_at} struktur yang sudah ada di browser → struktur tidak dikirim ulang kalau sama.
+    // Cache data per (periode, ringkas, akun) di server; kunci memuat jam tarik terakhir (ins_cover) → hangus otomatis setelah sync baru.
     $from = (string) ($in['from'] ?? ''); $to = (string) ($in['to'] ?? '');
     if (!ins_date($from) || !ins_date($to) || $from > $to) fail('Tanggal tidak valid');
     $nDays = (int) round((strtotime($to) - strtotime($from)) / 86400) + 1;
     if ($nDays > 400) fail('Rentang terlalu panjang');
+    $ringkas = !empty($in['ringkas']); $sv = is_array($in['sv'] ?? null) ? $in['sv'] : [];
     $pdo = ac_pdo();
     $ids = ins_ids($C); $ph = implode(',', array_fill(0, count($ids), '?'));
     $q = $pdo->prepare("SELECT act_id, COUNT(*) n, MAX(ditarik_at) baru FROM ins_cover WHERE tanggal BETWEEN ? AND ? AND act_id IN ($ph) GROUP BY act_id");
@@ -276,25 +282,78 @@ if ($action === 'local') {
     $res = [];
     foreach ($ids as $id) $res[$id] = ['covered' => in_array($id, $ok, true), 'missing' => $nDays - (int) ($cov[$id]['n'] ?? 0),
         'updated' => $cov[$id]['baru'] ?? null, 'status' => $stat[$id] ?? null];
-    $names = []; $nm = function (string $s) use (&$names) { static $ix = []; if (!isset($ix[$s])) { $ix[$s] = count($names); $names[] = $s; } return $ix[$s]; };
     if ($ok) {
-        $ph2 = implode(',', array_fill(0, count($ok), '?')); $bind = array_merge([$from, $to], $ok);
-        $q = $pdo->prepare("SELECT act_id, raw FROM ins_struct WHERE act_id IN ($ph2)"); $q->execute($ok);
-        foreach ($q->fetchAll() as $r) $res[$r['act_id']]['raw'] = json_decode($r['raw'], true);
-        foreach ($ok as $id) { $res[$id]['ad'] = []; $res[$id]['camp'] = []; $res[$id]['acc'] = []; }
-        $q = $pdo->prepare("SELECT act_id, tanggal, ad_id, adset_id, campaign_id, ad_name, adset_name, campaign_name, spend, impr, clicks, atc, purch, value, freq, vc, v3s, thru
-                            FROM ins_ad WHERE tanggal BETWEEN ? AND ? AND act_id IN ($ph2)");
-        $q->execute($bind);
-        while ($r = $q->fetch(PDO::FETCH_NUM)) $res[$r[0]]['ad'][] = [$r[1], $r[2], $r[3], $r[4], $nm($r[5]), $nm($r[6]), $nm($r[7]),
-            (float) $r[8], (int) $r[9], (int) $r[10], (int) $r[11], (int) $r[12], (float) $r[13], (float) $r[14], (int) $r[15], (int) $r[16], (int) $r[17]];
-        $q = $pdo->prepare("SELECT act_id, tanggal, campaign_id, spend, impr, clicks, atc, purch, value, vc, v3s, thru FROM ins_campaign WHERE tanggal BETWEEN ? AND ? AND act_id IN ($ph2)");
-        $q->execute($bind);
-        while ($r = $q->fetch(PDO::FETCH_NUM)) $res[$r[0]]['camp'][] = [$r[1], $r[2], (float) $r[3], (int) $r[4], (int) $r[5], (int) $r[6], (int) $r[7], (float) $r[8], (int) $r[9], (int) $r[10], (int) $r[11]];
-        $q = $pdo->prepare("SELECT act_id, tanggal, spend, impr, clicks, atc, purch, value, vc, v3s, thru FROM ins_account WHERE tanggal BETWEEN ? AND ? AND act_id IN ($ph2)");
-        $q->execute($bind);
-        while ($r = $q->fetch(PDO::FETCH_NUM)) $res[$r[0]]['acc'][] = [$r[1], (float) $r[2], (int) $r[3], (int) $r[4], (int) $r[5], (int) $r[6], (float) $r[7], (int) $r[8], (int) $r[9], (int) $r[10]];
+        $q = $pdo->prepare("SELECT act_id, diambil_at, raw FROM ins_struct WHERE act_id IN (" . implode(',', array_fill(0, count($ok), '?')) . ")"); $q->execute($ok);
+        foreach ($q->fetchAll() as $r) {
+            $res[$r['act_id']]['sv'] = (string) $r['diambil_at'];
+            if ((string) ($sv[$r['act_id']] ?? '') === (string) $r['diambil_at']) $res[$r['act_id']]['raw_sama'] = true;
+            else $res[$r['act_id']]['raw'] = json_decode($r['raw'], true);
+        }
     }
-    out_gz(['accounts' => $res, 'names' => $names, 'now' => date('Y-m-d H:i:s')]);
+    // data angka (tanpa struktur): dari cache kalau periode, mode & akun sama dan belum ada tarikan baru
+    $ver = $ok ? max(array_map(fn($id) => (string) ($cov[$id]['baru'] ?? ''), $ok)) : '';
+    $kunci = md5(json_encode([$from, $to, $ringkas, $ok, $ver, 2]));
+    $dir = '/var/lib/montera-ads/cache-local'; $f = "$dir/$kunci.json";
+    $data = is_file($f) ? @file_get_contents($f) : false;
+    $dariCache = $data !== false;
+    if (!$dariCache) {
+        $names = []; $ix = []; $nm = function (string $s) use (&$names, &$ix) { if (!isset($ix[$s])) { $ix[$s] = count($names); $names[] = $s; } return $ix[$s]; };
+        $D = [];
+        if ($ok) {
+            $ph2 = implode(',', array_fill(0, count($ok), '?')); $bind = array_merge([$from, $to], $ok);
+            foreach ($ok as $id) $D[$id] = ['ad' => [], 'camp' => [], 'acc' => [], 'campday' => []];
+            $q = $pdo->prepare($ringkas
+                ? "SELECT act_id, ? tgl, ad_id, MAX(adset_id), MAX(campaign_id), MAX(ad_name), MAX(adset_name), MAX(campaign_name), SUM(spend), SUM(impr), SUM(clicks), SUM(atc), SUM(purch), SUM(value),
+                          SUM(impr * freq) / NULLIF(SUM(impr), 0), SUM(vc), SUM(v3s), SUM(thru) FROM ins_ad WHERE tanggal BETWEEN ? AND ? AND act_id IN ($ph2) GROUP BY act_id, ad_id"
+                : "SELECT act_id, tanggal, ad_id, adset_id, campaign_id, ad_name, adset_name, campaign_name, spend, impr, clicks, atc, purch, value, freq, vc, v3s, thru
+                   FROM ins_ad WHERE tanggal BETWEEN ? AND ? AND act_id IN ($ph2)");
+            $q->execute($ringkas ? array_merge([$from], $bind) : $bind);
+            while ($r = $q->fetch(PDO::FETCH_NUM)) $D[$r[0]]['ad'][] = [$r[1], $r[2], $r[3], $r[4], $nm((string) $r[5]), $nm((string) $r[6]), $nm((string) $r[7]),
+                (float) $r[8], (int) $r[9], (int) $r[10], (int) $r[11], (int) $r[12], (float) $r[13], round((float) $r[14], 4), (int) $r[15], (int) $r[16], (int) $r[17]];
+            $q = $pdo->prepare($ringkas
+                ? "SELECT act_id, ? tgl, campaign_id, SUM(spend), SUM(impr), SUM(clicks), SUM(atc), SUM(purch), SUM(value), SUM(vc), SUM(v3s), SUM(thru) FROM ins_campaign WHERE tanggal BETWEEN ? AND ? AND act_id IN ($ph2) GROUP BY act_id, campaign_id"
+                : "SELECT act_id, tanggal, campaign_id, spend, impr, clicks, atc, purch, value, vc, v3s, thru FROM ins_campaign WHERE tanggal BETWEEN ? AND ? AND act_id IN ($ph2)");
+            $q->execute($ringkas ? array_merge([$from], $bind) : $bind);
+            while ($r = $q->fetch(PDO::FETCH_NUM)) $D[$r[0]]['camp'][] = [$r[1], $r[2], (float) $r[3], (int) $r[4], (int) $r[5], (int) $r[6], (int) $r[7], (float) $r[8], (int) $r[9], (int) $r[10], (int) $r[11]];
+            if ($ringkas) {
+                $q = $pdo->prepare("SELECT act_id, tanggal, SUM(spend), SUM(impr), SUM(clicks) FROM ins_campaign WHERE tanggal BETWEEN ? AND ? AND act_id IN ($ph2) GROUP BY act_id, tanggal");
+                $q->execute($bind);
+                while ($r = $q->fetch(PDO::FETCH_NUM)) $D[$r[0]]['campday'][] = [$r[1], (float) $r[2], (int) $r[3], (int) $r[4]];
+            }
+            $q = $pdo->prepare("SELECT act_id, tanggal, spend, impr, clicks, atc, purch, value, vc, v3s, thru FROM ins_account WHERE tanggal BETWEEN ? AND ? AND act_id IN ($ph2)");
+            $q->execute($bind);
+            while ($r = $q->fetch(PDO::FETCH_NUM)) $D[$r[0]]['acc'][] = [$r[1], (float) $r[2], (int) $r[3], (int) $r[4], (int) $r[5], (int) $r[6], (float) $r[7], (int) $r[8], (int) $r[9], (int) $r[10]];
+        }
+        $data = json_encode(['data' => (object) $D, 'names' => $names, 'ringkas' => $ringkas], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_dir($dir)) @mkdir($dir, 0775, true);
+        if (@file_put_contents("$f.tmp", $data) !== false) @rename("$f.tmp", $f);
+        if (mt_rand(1, 20) === 1) foreach (glob("$dir/*.json") ?: [] as $x) if (filemtime($x) < time() - 86400) @unlink($x);   // bersihkan cache > 1 hari
+    }
+    // gabung: {"accounts":…,"now":…,"cache":…, <isi data>}
+    $j = '{"accounts":' . json_encode((object) $res, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . ',"now":"' . date('Y-m-d H:i:s') . '","cache":' . ($dariCache ? 'true' : 'false') . ',' . substr($data, 1);
+    while (ob_get_level()) ob_end_clean();
+    if (strpos((string) ($_SERVER['HTTP_ACCEPT_ENCODING'] ?? ''), 'gzip') !== false) { header('Content-Encoding: gzip'); header('Vary: Accept-Encoding'); $j = gzencode($j, 5); }
+    header('Content-Type: application/json; charset=utf-8');
+    echo $j; exit;
+}
+/* [cepat 19 Nov] rincian HARIAN per iklan / campaign (mode ringkas): dipakai panel tren, rekap harian dengan pencarian, Montera AI */
+if ($action === 'local_hari') {
+    $from = (string) ($in['from'] ?? ''); $to = (string) ($in['to'] ?? '');
+    if (!ins_date($from) || !ins_date($to) || $from > $to) fail('Tanggal tidak valid');
+    $ad = array_values(array_filter(array_map('strval', (array) ($in['ad'] ?? [])), 'ctype_digit')); $cp = array_values(array_filter(array_map('strval', (array) ($in['camp'] ?? [])), 'ctype_digit'));
+    if (count($ad) > 6000 || count($cp) > 3000) fail('Terlalu banyak id');
+    $pdo = ac_pdo(); $o = ['ad' => [], 'camp' => []];
+    foreach (array_chunk($ad, 1000) as $pot) {
+        $q = $pdo->prepare("SELECT ad_id, tanggal, spend, impr, clicks, atc, purch, value, freq, vc, v3s, thru FROM ins_ad WHERE tanggal BETWEEN ? AND ? AND ad_id IN (" . implode(',', array_fill(0, count($pot), '?')) . ")");
+        $q->execute(array_merge([$from, $to], $pot));
+        while ($r = $q->fetch(PDO::FETCH_NUM)) $o['ad'][] = [$r[0], $r[1], (float) $r[2], (int) $r[3], (int) $r[4], (int) $r[5], (int) $r[6], (float) $r[7], (float) $r[8], (int) $r[9], (int) $r[10], (int) $r[11]];
+    }
+    foreach (array_chunk($cp, 1000) as $pot) {
+        $q = $pdo->prepare("SELECT campaign_id, tanggal, spend, impr, clicks, atc, purch, value, vc, v3s, thru FROM ins_campaign WHERE tanggal BETWEEN ? AND ? AND campaign_id IN (" . implode(',', array_fill(0, count($pot), '?')) . ")");
+        $q->execute(array_merge([$from, $to], $pot));
+        while ($r = $q->fetch(PDO::FETCH_NUM)) $o['camp'][] = [$r[0], $r[1], (float) $r[2], (int) $r[3], (int) $r[4], (int) $r[5], (int) $r[6], (float) $r[7], (int) $r[8], (int) $r[9], (int) $r[10]];
+    }
+    out_gz($o);
 }
 /* tombol refresh: jalankan sync di background (tidak menunggu Meta di request ini) */
 if ($action === 'refresh') {

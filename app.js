@@ -263,9 +263,10 @@ async function loadInsights(acc) {
   const q = insightReqs(acc);
   applyInsights(acc, gabung6(await Promise.all([getAdInsights(acc, q[0]), getAdInsights(acc, q[1]), ggetRetry(q[2], acc), ggetRetry(q[3], acc), ggetRetry(q[4], acc), ggetRetry(q[5], acc)])));
 }
-function applyInsights(acc, [adI, campI, accI]) {
-  acc.ads.forEach(a => { a.days = {}; a.freqR = null; });
-  acc.campaigns.forEach(c => c.days = {});
+function applyInsights(acc, [adI, campI, accI, campDay]) {
+  acc.ads.forEach(a => { a.days = {}; a.freqR = null; a.hariPenuh = false; });
+  acc.campaigns.forEach(c => { c.days = {}; c.hariPenuh = false; });
+  acc.ringkas = false;
   // r.x = angka siap pakai dari tabel lokal (localRows); tanpa r.x = baris mentah Meta
   adI.forEach(r => { const ad = acc.maps.mkAd(r.ad_id, r.ad_name, r.adset_id, r.adset_name, r.campaign_id, r.campaign_name); const x = r.x || rowArr(r); if (!r.x) x[6] = +r.frequency || 0; ad.days[r.date_start] = x; });
   campI.forEach(r => { const c = acc.maps.cMap.get(r.campaign_id); if (c) c.days[r.date_start] = r.x || rowArr(r); });
@@ -274,7 +275,7 @@ function applyInsights(acc, [adI, campI, accI]) {
   //   "campaign" = jumlah campaign ACTIVE+PAUSED                                → sama dengan script sheet Skinlyfe
   acc.daysAll = {}; acc.daysCamp = {}; acc.days = {};
   accI.forEach(r => { acc.daysAll[r.date_start] = r.x || rowArr(r); });
-  campI.forEach(r => { const d = acc.daysCamp[r.date_start] ||= [0, 0, 0, 0, 0, 0]; d[0] += +r.spend || 0; d[1] += +r.impressions || 0; d[2] += +r.inline_link_clicks || 0; });
+  (campDay && campDay.length ? campDay : campI).forEach(r => { const d = acc.daysCamp[r.date_start] ||= [0, 0, 0, 0, 0, 0]; d[0] += +r.spend || 0; d[1] += +r.impressions || 0; d[2] += +r.inline_link_clicks || 0; });
   const src = acc.spendSrc === "campaign" ? acc.daysCamp : acc.daysAll;
   new Set([...Object.keys(acc.daysAll), ...Object.keys(acc.daysCamp)]).forEach(d => {
     const sp = src[d] || [0, 0, 0], cv = acc.daysAll[d] || [0, 0, 0, 0, 0, 0];
@@ -340,7 +341,8 @@ function localRows(L, x) {   // baris ringkas api.php?action=local → bentuk ap
   return [
     x.ad.map(r => ({ date_start: r[0], ad_id: r[1], adset_id: r[2], campaign_id: r[3], ad_name: N[r[4]], adset_name: N[r[5]], campaign_name: N[r[6]], x: r.slice(7, 17) })),
     x.camp.map(r => ({ date_start: r[0], campaign_id: r[1], spend: r[2], impressions: r[3], inline_link_clicks: r[4], x: [r[2], r[3], r[4], r[5], r[6], r[7], 0, r[8], r[9], r[10]] })),
-    x.acc.map(r => ({ date_start: r[0], spend: r[1], impressions: r[2], inline_link_clicks: r[3], x: [r[1], r[2], r[3], r[4], r[5], r[6], 0, r[7], r[8], r[9]] }))
+    x.acc.map(r => ({ date_start: r[0], spend: r[1], impressions: r[2], inline_link_clicks: r[3], x: [r[1], r[2], r[3], r[4], r[5], r[6], 0, r[7], r[8], r[9]] })),
+    (x.campday || []).map(r => ({ date_start: r[0], spend: r[1], impressions: r[2], inline_link_clicks: r[3] }))   // [cepat] mode ringkas: campaign per akun per hari
   ];
 }
 const parseDT = s => s ? new Date(s.replace(" ", "T") + "+07:00") : null;   // jam DB (DATETIME) = WIB tanpa offset
@@ -355,20 +357,60 @@ function tandaiGagal(acc, msg) {   // data lama (tersimpan / tarikan sebelumnya)
 }
 const TOKEN_MSG = { invalid: "Token invalid (code 190) — ganti token di /etc/montera-ads-meta.json", no_access: "Token tidak punya akses ke akun ini — assign System User di Business Manager" };
 async function loadLocal() {   // akun yang SEMUA tanggalnya sudah tersimpan → langsung dari tabel lokal
+  // [cepat 19 Nov, Mufti] rentang ≥ 3 hari = mode RINGKAS (1 baris jumlah per iklan/campaign; rincian harian diambil saat perlu, siapkanHarian);
+  // struktur akun dari IndexedDB, server hanya mengirim struktur yang berubah (sv = versi struktur di browser)
   const done = new Set();
   const tA = performance.now();
-  const L = await api("local", { from: S.from, to: S.to });
+  await strukturDariIDB();
+  const sv = {}; ACCOUNTS.forEach(a => { if (a.raw && a.rawVer) sv[a.id] = a.rawVer; });
+  const ringkas = RANGE.length >= 3;
+  const L = await api("local", { from: S.from, to: S.to, ringkas, sv });
   UKUR.ambil = performance.now() - tA;   // [ukur-muat] ambil + parse data tersimpan
+  UKUR.cache = L.cache ? 1 : 0;
+  const baru = {};
   ACCOUNTS.forEach(a => {
     const x = L.accounts?.[a.id]; if (!x) return;
     a.localStatus = x.status; a.localAt = parseDT(x.updated);
     if (!x.covered) return;
-    a.raw = x.raw || { info: { currency: "IDR" }, camps: [], sets: [], ads: [] }; a.structAt = Date.now(); buildStructure(a);
-    applyInsights(a, localRows(L, x)); a.err = null; a.loaded = true; done.add(a);
+    if (x.raw) { a.raw = x.raw; a.rawVer = x.sv || ""; baru[a.id] = { sv: a.rawVer, raw: a.raw }; }
+    else if (!(x.raw_sama && a.raw)) a.raw = { info: { currency: "IDR" }, camps: [], sets: [], ads: [] };
+    a.structAt = Date.now(); buildStructure(a);
+    applyInsights(a, localRows(L, L.data?.[a.id] || x)); a.ringkas = !!L.ringkas; a.err = null; a.loaded = true; done.add(a);
     a.warn = ["no_access", "invalid"].includes(x.status?.token_status) ? { jenis: "akses", pesan: TOKEN_MSG[x.status.token_status] } : null;
   });
+  if (Object.keys(baru).length) strukturKeIDB(baru);
   return done;
 }
+// [cepat 19 Nov] struktur akun (± 4 MB, terlalu besar untuk localStorage) disimpan di IndexedDB per akun dengan versinya
+let IDB_SUDAH = false;
+function idb() { return new Promise((ok, no) => { try { const r = indexedDB.open("montera_ads", 1); r.onupgradeneeded = () => r.result.createObjectStore("struktur"); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); } catch (e) { no(e); } }); }
+async function strukturDariIDB() {
+  if (IDB_SUDAH) return; IDB_SUDAH = true;
+  try {
+    const db = await idb(); const st = db.transaction("struktur").objectStore("struktur");
+    await Promise.all(ACCOUNTS.filter(a => !a.raw || !a.rawVer).map(a => new Promise(ok => { const r = st.get(a.id); r.onsuccess = () => { const v = r.result; if (v && v.raw && v.sv) { a.raw = v.raw; a.rawVer = v.sv; } ok(); }; r.onerror = () => ok(); })));
+  } catch (e) { /* tanpa IndexedDB: struktur diambil dari server seperti biasa */ }
+}
+async function strukturKeIDB(baru) {
+  try { const db = await idb(); const st = db.transaction("struktur", "readwrite").objectStore("struktur"); Object.entries(baru).forEach(([id, v]) => st.put(v, id)); } catch (e) { }
+}
+// [cepat 19 Nov] mode ringkas: rincian HARIAN per iklan/campaign diambil saat perlu (panel tren, rekap harian dengan pencarian, Montera AI, export rekap harian)
+async function siapkanHarian(ents) {
+  const ads = new Map(), camps = new Map();
+  ents.forEach(e => {
+    if (!e || !e.acc?.ringkas) return;
+    (e.level === "ad" ? [e] : adsIn(e)).forEach(a => { if (!a.hariPenuh) ads.set(a.id, a); });
+    if (e.level === "campaign" && !e.hariPenuh) camps.set(e.id, e);
+    if (e.level !== "campaign" && e.camp && !e.camp.hariPenuh) camps.set(e.camp.id, e.camp);
+  });
+  if (!ads.size && !camps.size) return;
+  const j = await api("local_hari", { from: S.from, to: S.to, ad: [...ads.keys()], camp: [...camps.keys()] });
+  if (!j || j.error) return;
+  ads.forEach(a => { a.days = {}; a.hariPenuh = true; }); camps.forEach(c => { c.days = {}; c.hariPenuh = true; });
+  (j.ad || []).forEach(r => { const a = ads.get(String(r[0])); if (a) a.days[r[1]] = [r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]]; });
+  (j.camp || []).forEach(r => { const c = camps.get(String(r[0])); if (c) c.days[r[1]] = [r[2], r[3], r[4], r[5], r[6], r[7], 0, r[8], r[9], r[10]]; });
+}
+const perluHarian = e => !!e?.acc?.ringkas && ((e.level === "ad" ? [e] : adsIn(e)).some(a => !a.hariPenuh) || (e.level === "campaign" && !e.hariPenuh));
 // [status-akun 29 Okt] kotak status di atas dari cek pagi 06:00 (Meta = tersimpan = sheet = ERP) + status token terkini
 async function muatStatusAkun() {
   try {
@@ -419,7 +461,7 @@ function jadwalUlang() {   // [akses-kuning 29 Okt] akun "sementara" dicoba ulan
   }, 60000);
 }
 async function loadAll(withStructure) {   // withStructure=true (Shift+klik sync) = paksa live Meta untuk semua akun
-  if (S.busy) return;
+  if (S.busy) { if (!withStructure) S.antre = true; return; }   // [cepat 19 Nov] ganti periode saat masih memuat → diantre, tidak hilang
   ulangKe = 0;
   S.busy = true;
   const t0 = Date.now(), sec = () => Math.round((Date.now() - t0) / 1000);
@@ -464,8 +506,10 @@ async function loadAll(withStructure) {   // withStructure=true (Shift+klik sync
   }
   const tP = performance.now(); rebuild(); UKUR.proses = performance.now() - tP;
   S.lastSync = new Date(); S.busy = false; S.fromCache = false; S.syncSec = sec();
+  S.memuatPeriode = false; document.body.classList.remove("memuat");
   const tR = performance.now(); setLoading(""); render(); UKUR.render = performance.now() - tR;
   kirimUkur(t0); saveCache(); jadwalUlang(); muatStatusAkun(); muatStatusTotal();
+  if (S.antre) { S.antre = false; S.memuatPeriode = true; document.body.classList.add("memuat"); render(); loadAll(false); }
 }
 // [ukur-muat 19 Nov, Mufti] waktu muat per tahap dikirim ke server (ukur-muat.jsonl) untuk laporan sebelum → sesudah percepatan
 const UKUR = {}; let ukurPertama = true;
@@ -474,7 +518,8 @@ function kirimUkur(t0) {
   if (ukurPertama) { ms.halaman = Math.round(performance.now()); ukurPertama = false; }
   Object.keys(ms).forEach(k => ms[k] = Math.round(ms[k]));
   const n = { iklan: ADS.length, campaign: CAMPAIGNS.length, baris: document.querySelectorAll("#tbody tr").length, live_akun: failedLive || 0 };
-  api("ukur", { from: S.from, to: S.to, ver: "sebelum", hp: matchMedia("(max-width: 760px)").matches, ms, n }).catch(() => {});
+  n.cache = UKUR.cache || 0;
+  api("ukur", { from: S.from, to: S.to, ver: "sesudah", hp: matchMedia("(max-width: 760px)").matches, ms, n }).catch(() => {});
   UKUR.ambil = UKUR.proses = UKUR.render = 0; failedLive = 0;
 }
 let failedLive = 0;
@@ -709,7 +754,7 @@ function refreshClaudeUI() { if (S.panel) { const el = $("#clBox"); if (el) el.i
 async function runClaude(id) {
   const e = BY_ID.get(id); if (!e) return;
   const k = clKey(id); CL.set(k, { loading: true }); refreshClaudeUI();
-  try { CL.set(k, { data: await askClaude(CL_ONE, entityPayload(e)) }); }
+  try { await siapkanHarian([e]); CL.set(k, { data: await askClaude(CL_ONE, entityPayload(e)) }); }
   catch (err) { CL.set(k, { error: err.message }); }
   refreshClaudeUI();
 }
@@ -718,6 +763,7 @@ async function runClaudeBulk() {
   const rows = baseRows().filter(e => M.get(e.id).spend > 0).sort((x, y) => M.get(y.id).spend - M.get(x.id).spend).slice(0, 40);
   if (!rows.length) return;
   S.clBulk = { loading: true, n: rows.length }; renderAIBox();
+  try { await siapkanHarian(rows); } catch (e) { }   // [cepat] tren harian untuk Montera AI
   const payload = { periode: periodInfo(), target: targetInfo(), level: S.level,
     items: rows.map(e => ({ id: e.id, nama: e.name, akun: e.acc.name, delivery: delivery(e).t, mulai: e.start, budget: e.budget ? Math.round(e.budget) : null, ...mObj(M.get(e.id)),
       harian: RANGE.length > 1 ? dailyFrom(panelDays(e)).filter(r => r.m.spend > 0).reverse().map(r => [r.d, Math.round(r.m.spend), r.m.purch, Math.round(r.m.value), r.m.atc]) : undefined,
@@ -980,15 +1026,25 @@ function budgetCell(e) {
 const mcells = m => MCOLS.map(c => `<td class="num">${c.c(m)}</td>`).join("");
 const mfoot = t => MCOLS.map(c => { const [v, sm] = c.f(t); return `<td class="num"><b>${v}</b><small>${sm}</small></td>`; }).join("");
 
+// [cepat 19 Nov, Mufti] selama memuat: skeleton abu (bukan baris Rp0 / "Belum ada spend"); tabel 50 baris dulu, sisanya saat di-scroll
+function skeletonRows(n) { return Array.from({ length: n }, () => `<tr class="skel"><td class="c-chk"></td><td class="c-tog"></td><td class="c-name"><i class="sk" style="width:${40 + Math.round(Math.random() * 40)}%"></i><i class="sk sm"></i></td>${"<td><i class=\"sk\"></i></td>".repeat(6)}</tr>`).join(""); }
+const BARIS_AWAL = 50, BARIS_TAMBAH = 100;
+let tabelSisa = null, tabelObs = null;
+function tambahBaris() {
+  if (!tabelSisa || !tabelSisa.list.length) return;
+  const pot = tabelSisa.list.splice(0, BARIS_TAMBAH), tb = $("#tbody"), sen = tb.querySelector("tr.lanjut");
+  sen?.insertAdjacentHTML("beforebegin", pot.map(tabelSisa.html).join(""));
+  if (!tabelSisa.list.length) sen?.remove(); else sen.querySelector("td").textContent = `Memuat ${tabelSisa.list.length} baris lagi saat di-scroll…`;
+}
 function renderTable() {
-  if (!S.lastSync) { $("#thead").innerHTML = ""; $("#tbody").innerHTML = `<tr><td class="empty">Mengambil data dari Meta API…</td></tr>`; $("#tfoot").innerHTML = ""; return; }
+  if (!S.lastSync || S.memuatPeriode) { if (!$("#tbody tr.skel")) { $("#thead").innerHTML = ""; $("#tbody").innerHTML = skeletonRows(8); $("#tfoot").innerHTML = ""; } return; }
   if (S.view === "content") return renderContent();
   if (S.view === "daily") return renderDaily();
   if (S.view === "check") return renderCheck();
   const rows = visibleRows(), allSel = rows.length && rows.every(e => S.sel.has(e.id));
   $("#thead").innerHTML = `<tr><th class="c-chk"><input type="checkbox" id="chkAll" ${allSel ? "checked" : ""} aria-label="Pilih semua"></th><th class="c-tog">Off / On</th>${COLS.map(c =>
     `<th class="${c.cls || ""} ${c.n ? "num" : ""}" ${c.nosort || S.view === "winning" ? "" : `data-sort="${c.k}"`}>${c.t()}${S.sort.k === c.k && S.view !== "winning" ? (S.sort.dir < 0 ? " ↓" : " ↑") : ""}</th>`).join("")}${mhead(true)}</tr>`;
-  $("#tbody").innerHTML = rows.length ? rows.map((e, i) => {
+  const barisHTML = (e, i) => {
     const m = M.get(e.id), ai = AI.get(e.id), d = delivery(e), n = adsIn(e).length, part = S.q && e.level !== "ad" && n < e.ads.length;
     const sub = e.level === "ad"
       ? `<div class="sub">${esc(e.acc.name)} · ${esc(e.camp.name)}</div><div class="desc">${esc(e.desc)}</div>`
@@ -1000,7 +1056,14 @@ function renderTable() {
       <td><span class="dl ${d.c}"><i></i>${d.t}</span></td>
       <td class="c-ai">${(() => { const c = clGet(e.id)?.data; return c ? `<span class="clv">${MLOGO} ${AI_NAME}</span>${badge(V[c.verdict] ? c.verdict : "watch")}<div class="why">${esc(c.summary || "")}</div>` : `${badge(ai.v)}<div class="why">${esc(ai.r[0])}</div>`; })()}</td>
       <td class="num">${budgetCell(e)}</td>${mcells(m)}</tr>`;
-  }).join("") : `<tr><td colspan="${COLS.length + MCOLS.length + 2}" class="empty">Tidak ada ${LVL[S.level][1]} dengan delivery untuk filter & tanggal ini.</td></tr>`;
+  };
+  const awal = rows.slice(0, BARIS_AWAL), sisa = rows.slice(BARIS_AWAL);
+  let i0 = BARIS_AWAL; tabelSisa = { list: sisa.map(e => e), html: e => barisHTML(e, i0++) };
+  $("#tbody").innerHTML = rows.length ? awal.map(barisHTML).join("") + (sisa.length ? `<tr class="lanjut"><td colspan="${COLS.length + MCOLS.length + 2}" class="empty">Memuat ${sisa.length} baris lagi saat di-scroll…</td></tr>` : "")
+    : `<tr><td colspan="${COLS.length + MCOLS.length + 2}" class="empty">Tidak ada ${LVL[S.level][1]} dengan delivery untuk filter & tanggal ini.</td></tr>`;
+  tabelObs?.disconnect();
+  const sen = $("#tbody tr.lanjut");
+  if (sen) { tabelObs = new IntersectionObserver(en => { if (en.some(x => x.isIntersecting)) { tambahBaris(); const n = $("#tbody tr.lanjut"); if (n) { tabelObs.disconnect(); tabelObs.observe(n); } } }, { root: $(".table-wrap"), rootMargin: "400px" }); tabelObs.observe(sen); }
   // footer = total akun (dedup Meta, sama dengan Ads Manager) kalau tanpa pencarian/filter AI
   const accLevel = !QSET && S.view === "all";
   const t = accLevel ? sumM(scopedAccounts().filter(a => !a.err).map(accMetrics)) : sumM(rows.map(e => M.get(e.id)));
@@ -1034,6 +1097,7 @@ function dailyFrom(daysList) {
 }
 const dailySource = () => QSET ? ADS.filter(a => scopeOk(a) && qOk(a)).map(a => a.days) : scopedAccounts().filter(a => !a.err).map(a => a.days);
 function renderDaily() {
+  if (QSET) { const ents = ADS.filter(a => scopeOk(a) && qOk(a)); if (ents.some(perluHarian)) { $("#tbody").innerHTML = skeletonRows(6); siapkanHarian(ents).then(() => { if (S.view === "daily") renderTable(); }).catch(() => {}); return; } }
   const rows = dailyFrom(dailySource());
   $("#thead").innerHTML = `<tr><th class="c-chk"></th><th class="c-tog"></th><th class="c-name">Tanggal</th><th></th>${mhead(false)}</tr>`;
   $("#tbody").innerHTML = rows.map(({ d, m }) => `<tr class="norow"><td class="c-chk"></td><td class="c-tog"></td><td class="c-name"><b>${fmtDay(d)}</b>${d === TODAY ? `<div class="sub">s.d. ${hhmm(S.lastSync || new Date())}</div>` : ""}</td><td></td>${mcells(m)}</tr>`).join("");
@@ -1108,6 +1172,7 @@ function dailyTable(daysList) {
 }
 function openPanel(id) {
   const e = BY_ID.get(id); if (!e) return;
+  if (perluHarian(e)) siapkanHarian([e]).then(() => { if (S.panel === id) openPanel(id); }).catch(() => {});   // [cepat] tren harian dimuat saat panel dibuka
   const m = M.get(e.id), ai = AI.get(e.id), d = delivery(e), ads = adsIn(e);
   const daysList = panelDays(e);
   let extra;
@@ -1166,8 +1231,10 @@ async function setRange(from, to, preset) {
   if (from > to) [from, to] = [to, from];
   if (to > TODAY) to = TODAY;
   S.from = from; S.to = to; S.preset = preset;
+  S.memuatPeriode = true; document.body.classList.add("memuat");   // [cepat] skeleton, bukan angka Rp0 periode lama
   render();
   await loadAll(false);   // tarik insight untuk tanggal baru
+  if (S.memuatPeriode && !S.busy && !S.antre) { S.memuatPeriode = false; document.body.classList.remove("memuat"); render(); }
 }
 
 // =========================================================
@@ -1685,6 +1752,7 @@ async function doExport(target, btn, mode) {   // mode: "xlsx" (default) atau "g
       if (!confirm(`Export laporan hanya memuat data iklan s/d kemarin.\nRentang diganti jadi ${fmtD(dari)} – ${fmtD(kmr)}. Lanjut?`)) throw new Error("Export dibatalkan.");
       await setRange(dari, kmr, dari === kmr ? "yesterday" : "custom");
     }
+    if (S.view === "daily" && QSET) await siapkanHarian(ADS.filter(a => scopeOk(a) && qOk(a)));   // [cepat] rekap harian dengan pencarian butuh rincian harian
     const { sheets, tag, viewName, fileTag } = collectExport(target);
     if (mode === "gsheet") {
       const payload = { title: `Montera Ads · ${tag} · ${viewName} · ${rangeText()}`, sheets: sheets.map(({ name, d }) => ({
@@ -1823,6 +1891,7 @@ async function sendChat(text) {
     }
     const scope = `[Filter sekarang: ${S.acc ? ACCOUNTS.find(a => a.id === S.acc).name : "semua akun" + (S.pf !== "all" ? " " + S.pf : "")}${S.q ? `, pencarian "${S.q}"` : ""}${S.f.funnel !== "all" ? `, funnel ${S.f.funnel}` : ""} · ${periodLabel()} ${rangeText()}]`;
     const hist = CHAT.msgs.slice(-8).map((m, i, arr) => ({ role: m.role, content: m.role === "assistant" ? JSON.stringify({ reply: m.content, actions: (m.actions || []).map(({ status, err, ...a }) => a) }) : (i === arr.length - 1 ? `${scope}\n${m.content}` : m.content) }));
+    if (RANGE.length > 1) { try { await siapkanHarian(CAMPAIGNS.filter(c => adsIn(c).length && (M.get(c.id).spend > 0 || isOn(c))).sort((x, y) => M.get(y.id).spend - M.get(x.id).spend).slice(0, 60)); } catch (e) { } }
     const r = await askAI(CHAT_SYS(), hist);
     CHAT.msgs.push({ role: "assistant", _ad: true, content: String(r.reply || "(tidak ada jawaban)"), actions: Array.isArray(r.actions) ? r.actions.filter(a => a && a.id && a.type) : [] });
   } catch (err) { CHAT.msgs.push({ role: "assistant", content: `**Gagal:** ${err.message}`, actions: [] }); }
