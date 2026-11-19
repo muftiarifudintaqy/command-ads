@@ -43,6 +43,43 @@ function pl_produk(string $camp, string $adset, string $ad, ?array $P = null, bo
     return $katalog ? PL_KATALOG : PL_BELUM;
 }
 
+/** [katalog-produk 19 Nov] breakdown produk katalog per iklan dalam periode: [ad_id => [produk => [spend, purch, value]]] (tabel ins_ad_produk) */
+function pl_potongan(PDO $db, string $dari, string $sampai): array {
+    $o = [];
+    if (!$db->query("SHOW TABLES LIKE 'ins_ad_produk'")->fetchColumn()) return $o;
+    $q = $db->prepare("SELECT ad_id, produk, SUM(spend) sp, SUM(purch) pu, SUM(value) om FROM ins_ad_produk WHERE tanggal BETWEEN ? AND ? GROUP BY ad_id, produk");
+    $q->execute([$dari, $sampai]);
+    foreach ($q->fetchAll() as $r) $o[(string)$r['ad_id']][$r['produk']] = [(float)$r['sp'], (int)$r['pu'], (float)$r['om']];
+    return $o;
+}
+
+/**
+ * Pecah total 1 iklan katalog jadi potongan per produk dari breakdown Meta. Total TIDAK berubah:
+ *  - spend/purch/value per produk dari breakdown; kalau jumlah breakdown > total iklan (atribusi beda), potongan komponen itu diskalakan ke total
+ *  - sisa (total − jumlah breakdown) tetap "Katalog (multi produk)"; kolom lain ($ikut, mis. atc) dibagi menurut porsi spend
+ * @param array $tot ['spend' => , 'purch' => , 'omset' => , ...$ikut]  @return [produk => sama bentuk $tot]
+ */
+function pl_pecah(array $tot, array $pp, array $ikut = []): array {
+    $k3 = ['spend' => 0, 'purch' => 1, 'omset' => 2]; $jml = ['spend' => 0.0, 'purch' => 0.0, 'omset' => 0.0];
+    foreach ($pp as $x) foreach ($k3 as $k => $i) $jml[$k] += $x[$i];
+    $skala = []; foreach ($k3 as $k => $i) $skala[$k] = ($jml[$k] > (float)$tot[$k] && $jml[$k] > 0) ? (float)$tot[$k] / $jml[$k] : 1.0;
+    $o = []; $pakai = ['spend' => 0.0, 'purch' => 0.0, 'omset' => 0.0];
+    foreach ($pp as $prod => $x) {
+        $r = [];
+        foreach ($k3 as $k => $i) { $r[$k] = $x[$i] * $skala[$k]; $pakai[$k] += $r[$k]; }
+        $porsi = (float)$tot['spend'] > 0 ? $r['spend'] / (float)$tot['spend'] : 0.0;
+        foreach ($ikut as $k) $r[$k] = (float)($tot[$k] ?? 0) * $porsi;
+        $o[$prod] = $r;
+    }
+    $sisa = []; foreach ($k3 as $k => $i) $sisa[$k] = (float)$tot[$k] - $pakai[$k];
+    $porsi = (float)$tot['spend'] > 0 ? $sisa['spend'] / (float)$tot['spend'] : (count($pp) ? 0.0 : 1.0);
+    foreach ($ikut as $k) $sisa[$k] = (float)($tot[$k] ?? 0) * $porsi;
+    if (abs($sisa['spend']) >= 0.5 || abs($sisa['purch']) >= 0.5 || abs($sisa['omset']) >= 0.5) {
+        if (isset($o[PL_KATALOG])) foreach ($sisa as $k => $v) $o[PL_KATALOG][$k] += $v; else $o[PL_KATALOG] = $sisa;
+    }
+    return $o;
+}
+
 /** [adset_id => TRUE] adset yang mempromosikan product set katalog (promoted_object.product_set_id, dari ins_struct) */
 function pl_set_katalog(PDO $db): array {
     static $c = null; if ($c !== null) return $c;

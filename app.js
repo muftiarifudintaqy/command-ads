@@ -91,7 +91,26 @@ function productOf(ad) {   // produk 1 iklan ("" = belum diketahui); tanpa kode 
   PRODC.set(ad.id, r); return r;
 }
 const prodOfAd = ad => productOf(ad) || PROD_BELUM;
-const productsOfEnt = e => [...new Set((e.level === "ad" ? [e] : adsIn(e)).map(productOf).filter(Boolean))];
+// [katalog-produk 19 Nov, Mufti] iklan "Katalog (multi produk)" dengan breakdown produk Meta → potongan per produk; sisa tetap Katalog; total sama
+// (spend/purchase/value dari breakdown, kolom lain menurut porsi spend; breakdown > total → diskalakan ke total)
+function potongIklan(a) {
+  const full = AM.get(a.id) || derive(zero()), prod = prodOfAd(a);
+  if (prod !== PROD_KATALOG || !a.pp?.length) return [{ prod, m: full }];
+  const K = [["spend", 1], ["purch", 2], ["value", 3]], jml = { spend: 0, purch: 0, value: 0 };
+  a.pp.forEach(x => K.forEach(([k, i]) => jml[k] += x[i]));
+  const sk = {}; K.forEach(([k]) => sk[k] = jml[k] > full[k] && jml[k] > 0 ? full[k] / jml[k] : 1);
+  const IKUT = ["impr", "clicks", "atc", "vc", "v3", "thru", "fImpr"], out = new Map(), pakai = { spend: 0, purch: 0, value: 0 };
+  a.pp.forEach(x => {
+    const m = out.get(x[0]) || zero(); const porsi = full.spend ? x[1] * sk.spend / full.spend : 0;
+    K.forEach(([k, i]) => { m[k] += x[i] * sk[k]; pakai[k] += x[i] * sk[k]; });
+    IKUT.forEach(k => m[k] += (full[k] || 0) * porsi); out.set(x[0], m);
+  });
+  const r = zero(); K.forEach(([k]) => r[k] = full[k] - pakai[k]);
+  const porsiR = full.spend ? r.spend / full.spend : (a.pp.length ? 0 : 1); IKUT.forEach(k => r[k] = (full[k] || 0) * porsiR);
+  if (Math.abs(r.spend) >= 0.5 || Math.abs(r.purch) >= 0.5 || Math.abs(r.value) >= 0.5) { const k0 = out.get(PROD_KATALOG); if (k0) Object.keys(r).forEach(k => k0[k] += r[k]); else out.set(PROD_KATALOG, r); }
+  return [...out].map(([p, m], i) => { m.n = i === 0 ? 1 : 0; return { prod: p, m: derive(m) }; });
+}
+const productsOfEnt = e => [...new Set((e.level === "ad" ? [e] : adsIn(e)).flatMap(a => a.pp?.length && prodOfAd(a) === PROD_KATALOG ? [PROD_KATALOG, ...a.pp.map(x => x[0])] : [productOf(a)]).filter(Boolean))];
 const prodLabel = e => productsOfEnt(e).join(", ") || PROD_BELUM;
 const sameContent = (a, b) => a.ck === b.ck && productOf(a) === productOf(b);   // konten sama = nama iklan sama DAN produk sama
 
@@ -378,6 +397,9 @@ async function loadLocal() {   // akun yang SEMUA tanggalnya sudah tersimpan →
     else if (!(x.raw_sama && a.raw)) a.raw = { info: { currency: "IDR" }, camps: [], sets: [], ads: [] };
     a.structAt = Date.now(); buildStructure(a);
     applyInsights(a, localRows(L, L.data?.[a.id] || x)); a.ringkas = !!L.ringkas; a.err = null; a.loaded = true; done.add(a);
+    // [katalog-produk 19 Nov] potongan produk katalog per iklan (breakdown Meta, jumlah periode) → pengelompokan per produk
+    const byId = new Map(a.ads.map(z => [z.id, z])); a.ads.forEach(z => { z.pp = null; });
+    (L.data?.[a.id]?.pp || []).forEach(r => { const ad = byId.get(String(r[0])); if (ad) (ad.pp ||= []).push([L.names[r[1]], r[2], r[3], r[4]]); });
     a.warn = ["no_access", "invalid"].includes(x.status?.token_status) ? { jenis: "akses", pesan: TOKEN_MSG[x.status.token_status] } : null;
   });
   if (Object.keys(baru).length) strukturKeIDB(baru);
@@ -1075,8 +1097,8 @@ function renderTable() {
 
 function renderContent() {
   const ads = ADS.filter(a => scopeOk(a) && qOk(a)), groups = {};
-  ads.forEach(a => (groups[a.ck + "|" + prodOfAd(a)] ||= { name: a.name, prod: prodOfAd(a), ads: [] }).ads.push(a));   // [naming-produk] konten + produk
-  const rows = Object.values(groups).map(g => ({ ...g, m: sumM(g.ads.map(a => AM.get(a.id))), accs: [...new Set(g.ads.map(a => a.acc))] }))
+  ads.forEach(a => potongIklan(a).forEach(({ prod, m }) => { const x = (groups[a.ck + "|" + prod] ||= { name: a.name, prod, ads: [], ms: [] }); x.ads.push(a); x.ms.push(m); }));   // [naming-produk] konten + produk (katalog dipecah)
+  const rows = Object.values(groups).map(g => ({ ...g, m: sumM(g.ms), accs: [...new Set(g.ads.map(a => a.acc))] }))
     .filter(g => g.m.spend > 0).sort((x, y) => (y.m.purch ? y.m.roas : -1) - (x.m.purch ? x.m.roas : -1) || y.m.spend - x.m.spend);
   $("#thead").innerHTML = `<tr><th class="c-chk"></th><th class="c-tog">#</th><th class="c-name">Konten (nama iklan)</th><th>Dipakai di</th><th>Rekomendasi per iklan</th>${mhead(false)}</tr>`;
   $("#tbody").innerHTML = rows.length ? rows.map((g, i) => {
@@ -1511,8 +1533,12 @@ function namingGroups(ads, perAcc) {   // (naming + PRODUK) → iklan-iklannya. 
   // [naming-produk 19 Nov] naming sama tapi produk beda = baris terpisah (dulu digabung + 1 produk mayoritas → purchase Eye Cream masuk Tone Up)
   const g = new Map();
   ads.forEach(a => {
-    const label = namingOfEnt(a), prod = prodOfAd(a), k = (perAcc ? a.acc.id + "|" : "") + label.toLowerCase().replace(/[\s_.]+/g, "") + "|" + prod;
-    if (!g.has(k)) g.set(k, { label, prod, acc: a.acc, list: [] }); g.get(k).list.push(a);
+    const label = namingOfEnt(a);
+    potongIklan(a).forEach(({ prod, m }) => {   // [katalog-produk] iklan katalog ber-breakdown ikut ke beberapa baris produk
+      const k = (perAcc ? a.acc.id + "|" : "") + label.toLowerCase().replace(/[\s_.]+/g, "") + "|" + prod;
+      if (!g.has(k)) g.set(k, { label, prod, acc: a.acc, list: [], ms: [] });
+      const x = g.get(k); if (!x.list.includes(a)) x.list.push(a); x.ms.push(m);
+    });
   });
   return [...g.values()];
 }
@@ -1525,7 +1551,7 @@ function namingFix(ents, brand) {
   const pOrder = p => { const i = PRODUCTS.findIndex(x => x.label === p); return i < 0 ? 999 : i; };
   const groups = namingGroups(ads, false).map(x => {
     const run = x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0);
-    return { ...x, m: sumM(x.list.map(a => AM.get(a.id))), run,
+    return { ...x, m: sumM(x.ms), run,
       camps: [...new Set(run.map(a => a.camp))], accs: [...new Set(x.list.map(a => a.acc.id))] };
   }).filter(x => x.m.purch > 0)
     .sort((a, b) => pOrder(a.prod) - pOrder(b.prod) || winScore(b.m) - winScore(a.m));
@@ -1545,7 +1571,7 @@ function namingSummary(ents) {
   // dihitung SELALU dari level iklan (nama konten) — export dari Campaigns, Ad sets, atau Ads menghasilkan sheet Naming yang SAMA
   const ads = winAds(ents);
   const all = namingGroups(ads, true);
-  const groups = all.map(x => ({ ...x, m: sumM(x.list.map(a => AM.get(a.id))),
+  const groups = all.map(x => ({ ...x, m: sumM(x.ms),
       run: x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0),
       camps: [...new Set(x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0).map(a => a.camp))], accs: [...new Set(x.list.map(a => a.acc.name))] }))
     .filter(x => x.m.purch > 0)   // naming tanpa purchase = tidak winning → tidak masuk
@@ -1575,8 +1601,8 @@ function exportData() {
     return { title: `Cek data · ${rangeText()}`, head: ["Akun", "ID", "Spend level akun", "Spend campaign Active+Paused", "Spend per iklan", "Purchases", "Conversion value"], kinds: ["txt", "txt", "rp", "rp", "rp", "int", "rp"], rows };
   }
   if (S.view === "content") {
-    const g = {}; ADS.filter(a => scopeOk(a) && qOk(a)).forEach(a => (g[a.ck + "|" + prodOfAd(a)] ||= { name: a.name, prod: prodOfAd(a), ads: [] }).ads.push(a));   // [naming-produk] konten + produk
-    const list = Object.values(g).map(x => ({ ...x, m: sumM(x.ads.map(a => AM.get(a.id))) })).filter(x => x.m.spend > 0).sort((a, b) => winScore(b.m) - winScore(a.m));
+    const g = {}; ADS.filter(a => scopeOk(a) && qOk(a)).forEach(a => potongIklan(a).forEach(({ prod, m }) => { const x = (g[a.ck + "|" + prod] ||= { name: a.name, prod, ads: [], ms: [] }); x.ads.push(a); x.ms.push(m); }));   // [naming-produk] konten + produk (katalog dipecah)
+    const list = Object.values(g).map(x => ({ ...x, m: sumM(x.ms) })).filter(x => x.m.spend > 0).sort((a, b) => winScore(b.m) - winScore(a.m));
     return { title: `Winning content · ${rangeText()}`, head: ["Konten", "Produk", "Jumlah akun", "Jumlah iklan", ...mh], kinds: ["txt", "txt", "int", "int", ...mk],
       rows: list.map(x => [x.name, x.prod, new Set(x.ads.map(a => a.acc.id)).size, x.ads.length, ...mv(x.m)]), total: ["TOTAL", "", "", list.reduce((t, x) => t + x.ads.length, 0), ...mv(sumM(list.map(x => x.m)))] };
   }

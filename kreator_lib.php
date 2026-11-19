@@ -120,6 +120,20 @@ function kr_iklan(PDO $db, string $dari, string $sampai, string $merek = ''): ar
         $r['produk'] = pl_produk((string)$r['campaign_name'], (string)$r['adset_name'], (string)$r['ad_name'], null, isset($kat[(string)$r['adset_id']]));   // [naming-produk 19 Nov] produk per iklan
         $o[] = $r;
     }
+    // [katalog-produk 19 Nov] iklan "Katalog (multi produk)" yang punya breakdown produk dari Meta → dipecah per produk (total sama, sisa tetap Katalog)
+    $pp = pl_potongan($db, $dari, $sampai);
+    if ($pp) {
+        $o2 = [];
+        foreach ($o as $r) {
+            if ($r['produk'] !== PL_KATALOG || empty($pp[(string)$r['ad_id']])) { $o2[] = $r; continue; }
+            foreach (pl_pecah(['spend' => $r['spend'], 'purch' => $r['purch'], 'omset' => $r['omset'], 'atc' => $r['atc']], $pp[(string)$r['ad_id']], ['atc']) as $prod => $x) {
+                $y = $r; $y['produk'] = $prod; $y['spend'] = $x['spend']; $y['omset'] = $x['omset']; $y['purch'] = $x['purch']; $y['atc'] = $x['atc'];   // desimal: total tetap persis, dibulatkan saat tampil
+                $y['roas'] = kr_roas($y['spend'], $y['omset']); $y['cpa'] = $y['purch'] > 0 ? $y['spend'] / $y['purch'] : null; $y['kategori'] = kr_kategori($y['spend'], $y['roas']);
+                $y['pecahan'] = TRUE; $o2[] = $y;
+            }
+        }
+        $o = $o2;
+    }
     usort($o, function ($a, $b) { return $b['spend'] <=> $a['spend']; });
     return $o;
 }

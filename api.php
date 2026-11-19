@@ -292,7 +292,8 @@ if ($action === 'local') {
     }
     // data angka (tanpa struktur): dari cache kalau periode, mode & akun sama dan belum ada tarikan baru
     $ver = $ok ? max(array_map(fn($id) => (string) ($cov[$id]['baru'] ?? ''), $ok)) : '';
-    $kunci = md5(json_encode([$from, $to, $ringkas, $ok, $ver, 2]));
+    $q = $pdo->prepare("SELECT MAX(diambil_at) FROM ins_ad_produk WHERE tanggal BETWEEN ? AND ?"); $q->execute([$from, $to]); $verP = (string) $q->fetchColumn();   // [katalog-produk] breakdown terbaru
+    $kunci = md5(json_encode([$from, $to, $ringkas, $ok, $ver, $verP, 3]));
     $dir = '/var/lib/montera-ads/cache-local'; $f = "$dir/$kunci.json";
     $data = is_file($f) ? @file_get_contents($f) : false;
     $dariCache = $data !== false;
@@ -301,7 +302,11 @@ if ($action === 'local') {
         $D = [];
         if ($ok) {
             $ph2 = implode(',', array_fill(0, count($ok), '?')); $bind = array_merge([$from, $to], $ok);
-            foreach ($ok as $id) $D[$id] = ['ad' => [], 'camp' => [], 'acc' => [], 'campday' => []];
+            foreach ($ok as $id) $D[$id] = ['ad' => [], 'camp' => [], 'acc' => [], 'campday' => [], 'pp' => []];
+            // [katalog-produk 19 Nov] breakdown produk katalog per iklan (jumlah periode): [ad_id, produk(idx nama), spend, purch, value]
+            $q = $pdo->prepare("SELECT act_id, ad_id, produk, SUM(spend), SUM(purch), SUM(value) FROM ins_ad_produk WHERE tanggal BETWEEN ? AND ? AND act_id IN ($ph2) GROUP BY act_id, ad_id, produk");
+            $q->execute($bind);
+            while ($r = $q->fetch(PDO::FETCH_NUM)) $D[$r[0]]['pp'][] = [$r[1], $nm((string) $r[2]), (float) $r[3], (int) $r[4], (float) $r[5]];
             $q = $pdo->prepare($ringkas
                 ? "SELECT act_id, ? tgl, ad_id, MAX(adset_id), MAX(campaign_id), MAX(ad_name), MAX(adset_name), MAX(campaign_name), SUM(spend), SUM(impr), SUM(clicks), SUM(atc), SUM(purch), SUM(value),
                           SUM(impr * freq) / NULLIF(SUM(impr), 0), SUM(vc), SUM(v3s), SUM(thru) FROM ins_ad WHERE tanggal BETWEEN ? AND ? AND act_id IN ($ph2) GROUP BY act_id, ad_id"
@@ -328,6 +333,13 @@ if ($action === 'local') {
         if (!is_dir($dir)) @mkdir($dir, 0775, true);
         if (@file_put_contents("$f.tmp", $data) !== false) @rename("$f.tmp", $f);
         if (mt_rand(1, 20) === 1) foreach (glob("$dir/*.json") ?: [] as $x) if (filemtime($x) < time() - 86400) @unlink($x);   // bersihkan cache > 1 hari
+    }
+    // [kompat 19 Nov] tab yang masih memuat app.js lama (tanpa 'ringkas'/'sv') → bentuk lama: data angka di dalam accounts[id]
+    if (!array_key_exists('ringkas', $in)) {
+        $dd = json_decode($data, true);
+        foreach (($dd['data'] ?? []) as $id => $x) if (isset($res[$id])) { $res[$id] += ['ad' => $x['ad'], 'camp' => $x['camp'], 'acc' => $x['acc']]; if (!isset($res[$id]['raw']) && !empty($res[$id]['raw_sama'])) unset($res[$id]['raw_sama']); }
+        if ($ok) { $q = $pdo->prepare("SELECT act_id, raw FROM ins_struct WHERE act_id IN (" . implode(',', array_fill(0, count($ok), '?')) . ")"); $q->execute($ok); foreach ($q->fetchAll() as $r) if (!isset($res[$r['act_id']]['raw'])) $res[$r['act_id']]['raw'] = json_decode($r['raw'], true); }
+        out_gz(['accounts' => $res, 'names' => $dd['names'] ?? [], 'now' => date('Y-m-d H:i:s')]);
     }
     // gabung: {"accounts":…,"now":…,"cache":…, <isi data>}
     $j = '{"accounts":' . json_encode((object) $res, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . ',"now":"' . date('Y-m-d H:i:s') . '","cache":' . ($dariCache ? 'true' : 'false') . ',' . substr($data, 1);
