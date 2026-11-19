@@ -381,4 +381,11 @@ while ($queue || $run) {
     usleep(200000);
 }
 say("selesai $mode $since..$until · gagal $gagal akun");
+// [naming-produk 19 Nov, Mufti] pengaman otomatis tiap selesai sync: naming 2+ produk / produk Belum diketahui / nomor naming beda (kuning)
+// + total level iklan per akun ≠ level akun Ads Manager (merah) → /var/lib/montera-status/naming-cek.json → banner dashboard. Tanpa WA.
+try {
+    require_once dirname(__DIR__) . '/produk_lib.php';
+    $nc = pl_simpan_cek(kr_db());
+    say("cek naming/produk: {$nc['n_campur']} naming 2+ produk · {$nc['n_belum']} iklan produk Belum diketahui · {$nc['n_nomor']} nomor naming beda · " . count($nc['akun']) . ' akun-hari level iklan ≠ akun');
+} catch (Throwable $e) { say('cek naming/produk GAGAL: ' . $e->getMessage()); }
 exit($gagal ? 2 : 0);

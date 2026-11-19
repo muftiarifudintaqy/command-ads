@@ -50,13 +50,14 @@ foreach (['J' => $RP, 'K' => $RP, 'L' => $ROAS, 'M' => $ANGKA, 'N' => $RP] as $k
 /* ---------- Detail Konten ---------- */
 $ws = $ss->createSheet(); $ws->setTitle('Detail Konten');
 $rows = [];
-foreach ($iklan as $a) $rows[] = [$a['kreator']['nama'], $a['kategori'], $a['ad_name'], ucfirst((string)$a['merek']), $a['akun'], count($a['iklan'] ?? [1]),
+foreach ($iklan as $a) $rows[] = [$a['kreator']['nama'], $a['kategori'], $a['ad_name'], (string)($a['produk'] ?? ''), ucfirst((string)$a['merek']), $a['akun'], count($a['iklan'] ?? [1]),
     $a['mulai'] ? date('d/m/Y', strtotime($a['mulai'])) : '', round($a['spend']), round($a['omset']), $roasNilai($a['roas']), $a['purch'], $a['purch'] ? round($a['spend'] / $a['purch']) : NULL, $a['atc'], kr_link($a)];
-$akhir = $tabel($ws, ['Kreator', 'Kategori', $per === 'konten' ? 'Nama konten' : 'Nama iklan', 'Brand', 'Akun', 'Jumlah iklan digabung', 'Mulai tayang', 'Spent', 'Omset', 'ROAS', 'Purchase', 'CPA', 'ATC', 'Link Ads Manager'],
-    $rows, ['H' => $RP, 'I' => $RP, 'J' => $ROAS, 'K' => $ANGKA, 'L' => $RP, 'M' => $ANGKA], ['A' => 22, 'B' => 16, 'C' => 40, 'E' => 24, 'F' => 11, 'H' => 15, 'I' => 16, 'N' => 30]);
+// [naming-produk 19 Nov] kolom Produk (produk per iklan; konten dengan produk beda = baris beda)
+$akhir = $tabel($ws, ['Kreator', 'Kategori', $per === 'konten' ? 'Nama konten' : 'Nama iklan', 'Produk', 'Brand', 'Akun', 'Jumlah iklan digabung', 'Mulai tayang', 'Spent', 'Omset', 'ROAS', 'Purchase', 'CPA', 'ATC', 'Link Ads Manager'],
+    $rows, ['I' => $RP, 'J' => $RP, 'K' => $ROAS, 'L' => $ANGKA, 'M' => $RP, 'N' => $ANGKA], ['A' => 22, 'B' => 16, 'C' => 40, 'D' => 14, 'F' => 24, 'G' => 11, 'I' => 15, 'J' => 16, 'O' => 30]);
 foreach ($iklan as $i => $a) { $r = $i + 2;
     $ws->getStyle("B$r")->applyFromArray(['font' => ['bold' => TRUE, 'color' => ['rgb' => 'FFFFFF']], 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => $hex($WARNA[$a['kategori']])]]]);
-    $ws->setCellValue("N$r", 'Buka di Ads Manager'); $ws->getCell("N$r")->getHyperlink()->setUrl(kr_link($a)); $ws->getStyle("N$r")->getFont()->setUnderline(TRUE)->getColor()->setRGB('2563EB'); }
+    $ws->setCellValue("O$r", 'Buka di Ads Manager'); $ws->getCell("O$r")->getHyperlink()->setUrl(kr_link($a)); $ws->getStyle("O$r")->getFont()->setUnderline(TRUE)->getColor()->setRGB('2563EB'); }
 
 /* ---------- Belum ada kreator ---------- */
 $ws = $ss->createSheet(); $ws->setTitle('Belum ada kreator');

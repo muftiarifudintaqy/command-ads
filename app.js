@@ -54,7 +54,7 @@ let RANGE = [TODAY];
 // ---------- DATA ----------
 const ACCOUNTS = CFG.accounts.map(a => ({
   id: a.id.replace(/^act_/, ""), act: a.id.startsWith("act_") ? a.id : "act_" + a.id, name: a.name, pf: a.group, tokenKey: a.token,
-  prodDefault: a.product || "",   // produk default akun (config.php → 'product'), dipakai kalau nama iklan tidak mengandung kode produk
+  prodDefault: a.product || "",   // [19 Nov] TIDAK dipakai lagi untuk produk iklan (produk per iklan dari nama campaign/ad set/iklan, lihat productOf)
   // [30 Okt] brand dari config 'brand' (Prepare/Skinlyfe); token portfolio (glowingCantik, glowyGlow, marketBeauty, selowSkinlyfe) BUKAN brand
   brand: a.brand || (a.token.charAt(0).toUpperCase() + a.token.slice(1)),
   currency: "IDR", campaigns: [], ads: [], days: {}, daysAll: {}, daysCamp: {}, err: null, loaded: false, maps: null, raw: null, structAt: 0,
@@ -80,53 +80,21 @@ function productOfText(t) {
   return "";
 }
 const PRODC = new Map();
-function productOf(ad) {   // produk 1 iklan
+// [naming-produk 19 Nov, Mufti] PRODUK PER IKLAN: kode produk di nama CAMPAIGN → nama AD SET → nama IKLAN; tidak ketemu = "Belum diketahui".
+// TIDAK memakai produk mayoritas / spend terbesar / default akun / link (sama dengan produk_lib.php pl_produk di server).
+const PROD_BELUM = "Belum diketahui", PROD_KATALOG = "Katalog (multi produk)";
+function productOf(ad) {   // produk 1 iklan ("" = belum diketahui); tanpa kode tapi adset promosi product set katalog = "Katalog (multi produk)"
   if (PRODC.has(ad.id)) return PRODC.get(ad.id);
-  let slug = "";
-  try { const u = new URL(ad.link); slug = decodeURIComponent(u.pathname + " " + u.search).replace(/-i\.\d+\.\d+.*/, ""); } catch {}
-  const r = productOfText(slug) || productOfText(ad.camp?.name) || productOfText(ad.adset?.name) || productOfText(ad.name) || ad.acc?.prodDefault || "";
+  const r = productOfText(ad.camp?.name) || productOfText(ad.adset?.name) || productOfText(ad.name) || (ad.adset?.ps ? PROD_KATALOG : "");
   PRODC.set(ad.id, r); return r;
 }
+const prodOfAd = ad => productOf(ad) || PROD_BELUM;
 const productsOfEnt = e => [...new Set((e.level === "ad" ? [e] : adsIn(e)).map(productOf).filter(Boolean))];
-const prodLabel = e => productsOfEnt(e).join(", ");
+const prodLabel = e => productsOfEnt(e).join(", ") || PROD_BELUM;
+const sameContent = (a, b) => a.ck === b.ck && productOf(a) === productOf(b);   // konten sama = nama iklan sama DAN produk sama
 
-// PRODUK per NAMING (sheet Naming & Fix): WAJIB tepat 1 produk, tidak kosong, tidak gabungan.
-//   1. campaign dengan spend terbesar di naming itu yang namanya berisi kode produk
-//   2. ad set, lalu nama iklan (spend terbesar dulu)
-//   3. product set CPAS ad set → config.php 'product_sets' (nama product set tidak bisa dibaca API)
-//   4. kata kunci di naming lalu caption iklan — HANYA produk se-brand akun (config.php 'products' → 'caption')
-//   5. produk spend terbesar di akun itu (dari hasil langkah 1–4 semua naming akun), lalu se-brand
-const PSETS = CFG.productSets || {};
-const sameBrand = (p, brand) => !p.brand || !brand || p.brand.toLowerCase() === String(brand).toLowerCase();
-function productOfCaption(t, brand) {
-  if (!t) return "";
-  const x = " " + String(t).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ";
-  for (const p of PRODUCTS) if (sameBrand(p, brand) && [...p.keys, ...p.cap].some(k => k.trim() && x.includes(k))) return p.label;
-  return "";
-}
+// [naming-produk 19 Nov] PRODUK per NAMING dihapus: produk ditentukan per iklan (productOf) dan kunci gabung = naming + produk (namingGroups).
 const adSpend = a => AM.get(a.id)?.spend || 0;
-function productOfNaming(list, label, tops) {   // tops = null → hanya langkah 1–4 (dipakai productTops)
-  const rank = key => { const m = new Map(); list.forEach(a => { const o = key(a); if (!o) return; const e = m.get(o.id) || { o, s: 0 }; e.s += adSpend(a); m.set(o.id, e); }); return [...m.values()].sort((x, y) => y.s - x.s).map(e => e.o); };
-  let p;
-  for (const c of rank(a => a.camp)) if ((p = productOfText(c.name))) return p;
-  for (const s of rank(a => a.adset)) if ((p = productOfText(s.name))) return p;
-  for (const a of rank(a => a)) if ((p = productOfText(a.name))) return p;
-  for (const s of rank(a => a.adset)) if ((p = PSETS[s.ps])) return p;
-  const brand = rank(a => a.acc)[0]?.brand || "";
-  if ((p = productOfCaption(label, brand))) return p;
-  for (const a of rank(a => a)) if ((p = productOfCaption(a.desc, a.acc.brand))) return p;
-  if (!tops) return "";
-  for (const acc of rank(a => a.acc)) if ((p = tops.acc.get(acc.id))) return p;
-  return tops.brand.get(brand.toLowerCase()) || tops.any || "";
-}
-function productTops(groups) {   // produk spend terbesar per akun / per brand / semua — dari langkah 1–4 tiap naming per akun
-  const add = (m, k, p, s) => { const x = m.get(k) || new Map(); x.set(p, (x.get(p) || 0) + s); m.set(k, x); };
-  const acc = new Map(), br = new Map(), all = new Map();
-  groups.forEach(g => { const p = productOfNaming(g.list, g.label, null); if (!p) return;
-    g.list.forEach(a => { const s = adSpend(a); add(acc, a.acc.id, p, s); add(br, String(a.acc.brand).toLowerCase(), p, s); add(all, "*", p, s); }); });
-  const top = m => new Map([...m].map(([k, x]) => [k, [...x].sort((a, b) => b[1] - a[1])[0][0]]));
-  return { acc: top(acc), brand: top(br), any: top(all).get("*") || "" };
-}
 function rebuild() {
   PRODC.clear();
   CAMPAIGNS = ACCOUNTS.flatMap(a => a.campaigns.filter(c => c.ads.length));
@@ -410,19 +378,26 @@ async function muatStatusAkun() {
     el.title = (j.cek_pagi ? `Cek pagi ${j.cek_pagi}: Meta = data tersimpan = sheet = ERP` : "Cek pagi belum jalan") + (j.catatan?.length ? "\n" + j.catatan.join("\n") : "");
   } catch (e) { /* kotak status tidak boleh mengganggu halaman */ }
 }
-// [validasi-total 30 Okt] kotak "Status Data": 8 bagian ✅/⚠️/❌ (ERP & ads = sumber asli); klik = rincian (detail baris hanya Iklan)
+// [validasi-total 30 Okt] kotak "Status Data": bagian ✅/⚠️ (ERP & ads = sumber asli); klik = rincian (detail baris hanya Iklan)
+// [status-data 19 Nov, Mufti] + semua peringatan data dari dashboard (template #stExtra: akun Meta/ERP, saldo Shopee, naming & produk,
+// total akun ≠ Ads Manager, validasi harian). Tombol: "Status Data · N" KUNING kalau ada yang perlu dicek, hijau kalau 0. Tidak ada merah.
 async function muatStatusTotal() {
+  const el = $("#statusTotal"); if (!el) return;
+  let j = null; try { j = await api("status_total", {}); } catch (e) { /* tetap tampilkan peringatan dashboard */ }
   try {
-    const j = await api("status_total", {}); const el = $("#statusTotal"); if (!el || !j || j.error || !j.bagian) return;
-    const ik = { ok: "✅", warn: "⚠️", err: "❌" }, B = Object.values(j.bagian);
+    const ik = { ok: "✅", warn: "⚠️", err: "⚠️" }, B = j && !j.error && j.bagian ? Object.values(j.bagian) : [];
     const tg = d => d ? new Date(d + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short" }) : "belum valid";
-    el.className = "status-total " + (B.some(b => b.status === "err") ? "err" : B.some(b => b.status === "warn") ? "cek" : "ok");
-    el.innerHTML = `<button type="button" class="st-tombol">Status Data ${B.map(b => ik[b.status]).join("")}</button><div class="st-panel" hidden>
-      <div class="st-judul">Validasi harian total · dicek ${j.dibuat ? new Date(j.dibuat).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: WIB }) : "—"}</div>
-      ${B.map(b => `<div class="st-baris st-${b.status}"><span>${ik[b.status]}</span><b>${esc(b.nama)}</b><span>${esc(b.teks)}${b.selisih ? ` · <b>${b.selisih} selisih</b>` : ""}</span><small>${b.valid_sd ? "valid s/d " + tg(b.valid_sd) : "belum valid"}</small></div>
+    const ex = document.getElementById("stExtra"), extra = ex ? [...ex.content.children] : [];
+    const n = B.filter(b => b.status !== "ok").length + extra.filter(x => !x.classList.contains("ok")).length;
+    el.className = "status-total " + (n ? "cek" : "ok");
+    el.innerHTML = `<button type="button" class="st-tombol">${n ? `Status Data · ${n}` : "Status Data ✓"}</button><div class="st-panel" hidden>
+      ${extra.length ? `<div class="st-judul">Perlu dicek</div><div class="st-extra"></div>` : ""}
+      <div class="st-judul">Validasi harian total · dicek ${j?.dibuat ? new Date(j.dibuat).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: WIB }) : "—"}</div>
+      ${B.map(b => `<div class="st-baris st-${b.status === "err" ? "warn" : b.status}"><span>${ik[b.status]}</span><b>${esc(b.nama)}</b><span>${esc(b.teks)}${b.selisih ? ` · <b>${b.selisih} selisih</b>` : ""}</span><small>${b.valid_sd ? "valid s/d " + tg(b.valid_sd) : "belum valid"}</small></div>
         ${b.rincian.length ? `<table class="st-tabel">${b.rincian.map(r => `<tr><td>${esc(r.id)}</td><td>${esc(r.toko)}</td><td>${esc(String(r.erp))}</td><td>${esc(String(r.sumber))}</td><td>${esc(r.penyebab)}</td></tr>`).join("")}</table>` : ""}
         ${b.catatan.length ? `<ul class="st-cat">${b.catatan.map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}`).join("")}
       <div class="st-kaki">Rincian semua bagian: dashboard ERP → Status Data.</div></div>`;
+    const box = el.querySelector(".st-extra"); if (box) extra.forEach(x => box.appendChild(x.cloneNode(true)));
     el.querySelector(".st-tombol").onclick = () => { const p = el.querySelector(".st-panel"); p.hidden = !p.hidden; };
   } catch (e) { /* kotak status tidak boleh mengganggu halaman */ }
 }
@@ -608,7 +583,7 @@ function analyze(e) {
     r.push(`Cost per purchase ${rp(m.cpa)} di bawah batas ${rp(T.cpa)}${m.freq ? `, frequency ${m.freq.toFixed(2)} masih aman` : ""}.`);
     act.push(off ? `${cap(word)} ini Off padahal winning — nyalakan lagi.` : "Naikkan budget 20–30% tiap 48 jam (jangan langsung 2× biar learning nggak reset).");
     if (e.level === "ad") {
-      const used = new Set(ADS.filter(a => a.ck === e.ck).map(a => a.acc.id));
+      const used = new Set(ADS.filter(a => sameContent(a, e)).map(a => a.acc.id));
       const unused = ACCOUNTS.filter(x => x.pf === e.acc.pf && !used.has(x.id)).map(x => x.name);
       if (unused.length) act.push(`Duplikat iklan ini ke ${unused.slice(0, 3).join(", ")} yang belum pakai konten ini.`);
     }
@@ -674,7 +649,7 @@ function entityPayload(e) {
     penilaian_rule_engine: { verdict: AI.get(e.id).v, alasan: AI.get(e.id).r } };
   if (e.level === "ad") {
     p.primary_text = e.desc;
-    p.konten_sama_di_akun_lain = ADS.filter(a => a.ck === e.ck && a !== e).slice(0, 10).map(a => ({ akun: a.acc.name, delivery: delivery(a).t, ...mObj(AM.get(a.id)) }));
+    p.konten_sama_di_akun_lain = ADS.filter(a => sameContent(a, e) && a !== e).slice(0, 10).map(a => ({ akun: a.acc.name, delivery: delivery(a).t, ...mObj(AM.get(a.id)) }));
   } else {
     p.iklan_di_dalamnya = adsIn(e).sort((x, y) => AM.get(y.id).spend - AM.get(x.id).spend).slice(0, 15)
       .map(a => ({ nama: a.name, delivery: delivery(a).t, primary_text: a.desc.slice(0, 160), ...mObj(AM.get(a.id)) }));
@@ -833,6 +808,19 @@ function accCard(sum, sub, m, extra, sel, attr, live, err, warn) {
     <div class="acc-f">${extra}${err ? "" : `<span class="acc-dl" role="button" tabindex="0" title="Download Excel ${esc(sub[0])}" data-export="${sum ? "all" : attr.match(/data-acc="([^"]*)"/)[1]}" data-mode="xlsx"><svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"/></svg>Excel</span>`}</div>
   </button>`;
 }
+// [centang-akun 19 Nov, Mufti] akun yang tampil sesuai tab brand/grup & pencarian akun (urutan tetap = config)
+function accsInFilter() {
+  let accs = ACCOUNTS.filter(a => pfOk(a) && (a.name + " " + a.id + " " + a.pf).toLowerCase().includes(S.accQ));
+  if (S.q) accs = accs.filter(a => a.ads.some(qOk));
+  return accs;
+}
+function accTotalGroup(accs) {   // kartu Total (ikut berubah saat centang) — satu-satunya bagian daftar akun yang digambar ulang saat centang
+  const totAccs = S.multi.size ? accs.filter(a => S.multi.has(a.id)) : accs;
+  const tot = sumM(totAccs.filter(a => !a.err).map(accMetrics));
+  const allAds = totAccs.flatMap(a => a.ads.filter(qOk));
+  const qInfo = ads => S.q ? `<span class="qtag">"${esc(S.q)}": ${ads.length} iklan · ${new Set(ads.map(a => a.camp.id)).size} campaign</span>` : "";
+  return `<div class="acc-group"><div class="acc-group-label">${S.q ? `Total "${esc(S.q)}"` : "Total"} · ${periodLabel()}</div><div class="acc-row">${accCard(true, S.multi.size ? [`${S.multi.size} akun dipilih`, totAccs.map(a => a.name.replace(/PREPARE CPAS - |CPAS - SKINLYFE /i, "")).join(", ")] : [S.q ? `${accs.length} akun cocok` : "Semua akun", `${accs.length} ad accounts`], tot, qInfo(allAds) + (S.multi.size ? `<span class="acc-clear" role="button" tabindex="0" data-pickclear="1">✕ Hapus pilihan</span>` : ""), !S.acc, `data-acc=""`, null)}</div></div>`;
+}
 function renderAccounts() {
   const pfs = [...new Set(ACCOUNTS.map(a => a.pf))];
   const brands = [...new Set(ACCOUNTS.map(a => a.brand))];
@@ -843,13 +831,10 @@ function renderAccounts() {
       .map(([k, t, n]) => `<button class="pill brand ${S.brand === k ? "on" : ""}" data-brand="${esc(k)}">${esc(t)}<span>${n}</span></button>`).join("") +
     (S.brand !== "all" && groups2.length > 1 ? `<span class="pill-sep"></span>` + [["all", `Semua ${S.brand}`, inBrand.length], ...groups2.map(p => [p, p, inBrand.filter(a => a.pf === p).length])]
       .map(([k, t, n]) => `<button class="pill ${S.pf === k ? "on" : ""}" data-pf="${esc(k)}">${esc(t)}<span>${n}</span></button>`).join("") : "");
-  let accs = ACCOUNTS.filter(a => pfOk(a) && (a.name + " " + a.id + " " + a.pf).toLowerCase().includes(S.accQ));
-  if (S.q) accs = accs.filter(a => a.ads.some(qOk));
-  const totAccs = S.multi.size ? accs.filter(a => S.multi.has(a.id)) : accs;
-  const tot = sumM(totAccs.filter(a => !a.err).map(accMetrics));
-  const allAds = totAccs.flatMap(a => a.ads.filter(qOk));
+  $("#pfPills").innerHTML += `<span class="pill-sep"></span><button class="pill" data-pickall="1" title="Centang semua akun yang tampil (sesuai tab brand & pencarian)">☑ Pilih semua (sesuai filter)</button><button class="pill" data-pickclear="1" title="Kosongkan semua centang akun">Kosongkan</button>`;
+  const accs = accsInFilter();
+  let html = accTotalGroup(accs);
   const qInfo = ads => S.q ? `<span class="qtag">"${esc(S.q)}": ${ads.length} iklan · ${new Set(ads.map(a => a.camp.id)).size} campaign</span>` : "";
-  let html = `<div class="acc-group"><div class="acc-group-label">${S.q ? `Total "${esc(S.q)}"` : "Total"} · ${periodLabel()}</div><div class="acc-row">${accCard(true, S.multi.size ? [`${S.multi.size} akun dipilih`, totAccs.map(a => a.name.replace(/PREPARE CPAS - |CPAS - SKINLYFE /i, "")).join(", ")] : [S.q ? `${accs.length} akun cocok` : "Semua akun", `${accs.length} ad accounts`], tot, qInfo(allAds) + (S.multi.size ? `<span class="acc-clear" role="button" tabindex="0" data-pickclear="1">✕ Hapus pilihan</span>` : ""), !S.acc, `data-acc=""`, null)}</div></div>`;
   const groups = {};
   accs.forEach(a => (groups[a.pf] ||= []).push(a));
   Object.entries(groups).forEach(([pf, list]) => {
@@ -868,7 +853,7 @@ function renderFilters() {
   const f = S.f, n = filterCount();
   $("#filters").innerHTML = `
     <label>Funnel <select data-f="funnel">${["all", ...FUNNELS.map(x => x.label), "Lainnya"].map(v => `<option value="${v}" ${f.funnel === v ? "selected" : ""}>${v === "all" ? "Semua" : v}</option>`).join("")}</select></label>
-    <label>Produk <select data-f="prod"><option value="all">Semua</option>${PRODUCTS.map(p => `<option value="${esc(p.label)}" ${f.prod === p.label ? "selected" : ""}>${esc(p.label)}</option>`).join("")}<option value="none" ${f.prod === "none" ? "selected" : ""}>Tidak terdeteksi</option></select></label>
+    <label>Produk <select data-f="prod"><option value="all">Semua</option>${PRODUCTS.map(p => `<option value="${esc(p.label)}" ${f.prod === p.label ? "selected" : ""}>${esc(p.label)}</option>`).join("")}<option value="${PROD_KATALOG}" ${f.prod === PROD_KATALOG ? "selected" : ""}>${PROD_KATALOG}</option><option value="none" ${f.prod === "none" ? "selected" : ""}>${PROD_BELUM}</option></select></label>
     <label>Delivery <select data-f="deliv">${["all", "Active", "Off", "Rejected", "In review", "Error"].map(v => `<option value="${v}" ${f.deliv === v ? "selected" : ""}>${v === "all" ? "Semua" : v}</option>`).join("")}</select></label>
     <label>Rekomendasi <select data-f="verdict"><option value="all">Semua</option>${Object.keys(V).map(k => `<option value="${k}" ${f.verdict === k ? "selected" : ""}>${V[k].label}</option>`).join("")}</select></label>
     <label>Spend ≥ <input type="number" min="0" step="1000" data-f="spendMin" value="${f.spendMin}" placeholder="Rp"></label>
@@ -1010,7 +995,7 @@ function renderTable() {
 
 function renderContent() {
   const ads = ADS.filter(a => scopeOk(a) && qOk(a)), groups = {};
-  ads.forEach(a => (groups[a.ck] ||= { name: a.name, ads: [] }).ads.push(a));
+  ads.forEach(a => (groups[a.ck + "|" + prodOfAd(a)] ||= { name: a.name, prod: prodOfAd(a), ads: [] }).ads.push(a));   // [naming-produk] konten + produk
   const rows = Object.values(groups).map(g => ({ ...g, m: sumM(g.ads.map(a => AM.get(a.id))), accs: [...new Set(g.ads.map(a => a.acc))] }))
     .filter(g => g.m.spend > 0).sort((x, y) => (y.m.purch ? y.m.roas : -1) - (x.m.purch ? x.m.roas : -1) || y.m.spend - x.m.spend);
   $("#thead").innerHTML = `<tr><th class="c-chk"></th><th class="c-tog">#</th><th class="c-name">Konten (nama iklan)</th><th>Dipakai di</th><th>Rekomendasi per iklan</th>${mhead(false)}</tr>`;
@@ -1018,7 +1003,7 @@ function renderContent() {
     const cnt = k => g.ads.filter(a => AI.get(a.id).v === k).length;
     return `<tr data-content="${esc(g.ads[0].ck)}">
       <td class="c-chk"></td><td class="c-tog"><span class="rank">${i + 1}</span></td>
-      <td class="c-name"><div class="nm">${thumb(g.ads[0])}<div><a>${esc(g.name)}</a><div class="desc">${esc(g.ads[0].desc)}</div></div></div></td>
+      <td class="c-name"><div class="nm">${thumb(g.ads[0])}<div><a>${esc(g.name)}</a> <span class="chip">${esc(g.prod)}</span><div class="desc">${esc(g.ads[0].desc)}</div></div></div></td>
       <td><b>${g.accs.length} akun</b> · ${g.ads.length} iklan<div class="chips sm">${g.accs.slice(0, 4).map(a => `<span class="chip">${esc(a.name)}</span>`).join("")}${g.accs.length > 4 ? `<span class="chip">+${g.accs.length - 4}</span>` : ""}</div></td>
       <td><div class="chips sm">${Object.keys(V).filter(cnt).map(k => `<span class="vb ${V[k].cls}">${V[k].icon} ${cnt(k)}</span>`).join("")}</div></td>${mcells(g.m)}</tr>`;
   }).join("") : `<tr><td colspan="${MCOLS.length + 5}" class="empty">Belum ada konten dengan spend di tanggal ini.</td></tr>`;
@@ -1060,6 +1045,31 @@ function renderCheck() {   // bandingkan 3 sumber spend dari Meta API supaya bis
   renderSel();
 }
 
+// [centang-akun 19 Nov, Mufti] centang akun: ubah checkbox itu + kartu Total + data di bawahnya; daftar akun TIDAK digambar ulang,
+// posisi scroll (halaman, strip akun, tabel) & fokus dijaga. Pilihan tetap tersimpan saat ganti tab brand / cari akun.
+function keepScroll(fn, hanya) {   // hanya = selector → hanya scroll elemen itu yang dijaga (tanpa scroll halaman & fokus)
+  const pos = [...document.querySelectorAll(hanya || ".acc-strip, .table-wrap, .xp-list, .mini-wrap")].map(e => [e, e.scrollLeft, e.scrollTop]);
+  const wx = window.scrollX, wy = window.scrollY, act = hanya ? null : document.activeElement;
+  const key = act?.dataset?.pick ? `[data-pick="${act.dataset.pick}"]` : act?.dataset?.chk ? `[data-chk="${act.dataset.chk}"]` : null;
+  fn();
+  const back = () => { pos.forEach(([e, l, tp]) => { if (e.isConnected && (e.scrollLeft !== l || e.scrollTop !== tp)) { e.scrollLeft = l; e.scrollTop = tp; } }); if (!hanya && (window.scrollX !== wx || window.scrollY !== wy)) window.scrollTo(wx, wy); };
+  back();
+  if (key) { const n = document.querySelector(key); if (n && n !== document.activeElement) n.focus({ preventScroll: true }); }
+  if (!hanya) requestAnimationFrame(back);
+}
+function syncPicks() {
+  document.querySelectorAll("#accStrip [data-pick]").forEach(p => {
+    const id = p.dataset.pick, on = S.multi.has(id);
+    p.classList.toggle("on", on); p.setAttribute("aria-checked", on); p.textContent = on ? "✓" : "";
+    p.closest(".acc")?.classList.toggle("sel", on || S.acc === id);
+  });
+  const g = $("#accStrip .acc-group"); if (g && g.querySelector('[data-acc=""]')) g.outerHTML = accTotalGroup(accsInFilter());
+}
+function pickChanged() {
+  S.acc = null; S.sel.clear();
+  keepScroll(() => { compute(); renderHeader(); syncPicks(); renderViews(); renderFunnels(); renderFilters(); renderQSummary(); renderAIBox(); renderTable(); if (S.panel) openPanel(S.panel); });
+}
+function syncChkAll() { const a = $("#chkAll"); if (!a) return; const r = visibleRows(); a.checked = !!r.length && r.every(e => S.sel.has(e.id)); }
 function renderSel() { const n = S.sel.size; $("#btnOff").disabled = $("#btnOn").disabled = !n; $("#selInfo").textContent = n ? `${n} dipilih` : ""; }
 
 // ---------- PANEL ----------
@@ -1087,7 +1097,7 @@ function openPanel(id) {
   const daysList = panelDays(e);
   let extra;
   if (e.level === "ad") {
-    const same = ADS.filter(a => a.ck === e.ck && a !== e).sort((x, y) => AM.get(y.id).roas - AM.get(x.id).roas);
+    const same = ADS.filter(a => sameContent(a, e) && a !== e).sort((x, y) => AM.get(y.id).roas - AM.get(x.id).roas);
     extra = `<h4>Konten yang sama di iklan lain (${same.length})</h4>` + (same.map(a => {
       const am = AM.get(a.id);
       return `<button class="prow" data-open="${a.id}">${thumb(a)}<div><b>${esc(a.acc.name)}</b><small>${esc(a.camp.name)} · spend ${rpS(am.spend)} · ${num(am.purch)} purchase</small></div><span class="pv"><b>${am.purch ? f2(am.roas) : "—"}</b>${badge(AI.get(a.id).v)}</span></button>`;
@@ -1130,10 +1140,12 @@ function closePanel() { $("#panel").classList.remove("show"); $("#overlay").clas
 
 function setLoading(t) { S.loading = t; $("#loading").hidden = !t; $("#loading").textContent = t; }
 
-function render() {
-  compute();
-  renderHeader(); renderAccounts(); renderViews(); renderFunnels(); renderFilters(); renderQSummary(); renderAIBox(); renderTable();
-  if (S.panel) openPanel(S.panel);
+function render() {   // [centang-akun 19 Nov] posisi geser strip akun dijaga juga saat render penuh (refresh otomatis, ganti tab); scroll halaman tidak disentuh
+  keepScroll(() => {
+    compute();
+    renderHeader(); renderAccounts(); renderViews(); renderFunnels(); renderFilters(); renderQSummary(); renderAIBox(); renderTable();
+    if (S.panel) openPanel(S.panel);
+  }, ".acc-strip");
 }
 async function setRange(from, to, preset) {
   if (from > to) [from, to] = [to, from];
@@ -1228,8 +1240,9 @@ document.addEventListener("click", ev => {
   if (t.closest("[data-chk]") || t.id === "chkAll") return;
   const op = t.closest("[data-open]"); if (op) { openPanel(op.dataset.open); return; }
   const ct = t.closest("[data-content]"); if (ct) { setQ(ct.dataset.content); S.view = "all"; S.level = "ad"; closePanel(); render(); return; }
-  const pk = t.closest("[data-pick]"); if (pk) { ev.preventDefault(); ev.stopPropagation(); const id = pk.dataset.pick; S.multi.has(id) ? S.multi.delete(id) : S.multi.add(id); S.acc = null; S.sel.clear(); render(); return; }
-  if (t.closest("[data-pickclear]")) { ev.stopPropagation(); S.multi.clear(); render(); return; }
+  const pk = t.closest("[data-pick]"); if (pk) { ev.preventDefault(); ev.stopPropagation(); const id = pk.dataset.pick; S.multi.has(id) ? S.multi.delete(id) : S.multi.add(id); pickChanged(); return; }
+  if (t.closest("[data-pickclear]")) { ev.preventDefault(); ev.stopPropagation(); S.multi.clear(); pickChanged(); return; }
+  if (t.closest("[data-pickall]")) { ev.preventDefault(); ev.stopPropagation(); accsInFilter().filter(a => !a.err).forEach(a => S.multi.add(a.id)); pickChanged(); return; }
   const acc = t.closest("[data-acc]"); if (acc) { S.acc = acc.dataset.acc || null; if (!acc.dataset.acc) S.multi.clear(); else S.multi.clear(); S.sel.clear(); render(); return; }
   const fn = t.closest("[data-funnel]"); if (fn) { S.f.funnel = S.f.funnel === fn.dataset.funnel ? "all" : fn.dataset.funnel; render(); return; }
   const br = t.closest("[data-brand]"); if (br) { S.brand = br.dataset.brand; S.pf = "all"; S.acc = null; render(); return; }
@@ -1256,8 +1269,12 @@ document.addEventListener("click", ev => {
 });
 document.addEventListener("change", ev => {
   const t = ev.target;
-  if (t.dataset.chk) { t.checked ? S.sel.add(t.dataset.chk) : S.sel.delete(t.dataset.chk); t.closest("tr").classList.toggle("sel", t.checked); renderSel(); }
-  if (t.id === "chkAll") { visibleRows().forEach(e => t.checked ? S.sel.add(e.id) : S.sel.delete(e.id)); renderTable(); }
+  if (t.dataset.chk) { t.checked ? S.sel.add(t.dataset.chk) : S.sel.delete(t.dataset.chk); t.closest("tr").classList.toggle("sel", t.checked); syncChkAll(); renderSel(); }
+  if (t.id === "chkAll") {   // [centang 19 Nov] hanya checkbox & warna baris yang berubah, tabel tidak digambar ulang (scroll tetap)
+    visibleRows().forEach(e => t.checked ? S.sel.add(e.id) : S.sel.delete(e.id));
+    document.querySelectorAll("#tbody [data-chk]").forEach(c => { c.checked = S.sel.has(c.dataset.chk); c.closest("tr").classList.toggle("sel", c.checked); });
+    renderSel();
+  }
 });
 // ---------- SEARCH ala Ads Manager: saran + riwayat (bisa dihapus) ----------
 const QH = { list: store.get("ac_qhist", []), sel: -1, items: [] };
@@ -1406,11 +1423,12 @@ function winAds(ents) {
   ents.forEach(e => (e.level === "ad" ? [e] : adsIn(e)).forEach(a => { if (!seen.has(a.id) && scopeOk(a) && qOk(a)) { seen.add(a.id); ads.push(a); } }));
   return ads;
 }
-function namingGroups(ads, perAcc) {   // naming → iklan-iklannya. perAcc: per akun (sheet Naming) / gabungan semua akun (sheet Fix)
+function namingGroups(ads, perAcc) {   // (naming + PRODUK) → iklan-iklannya. perAcc: per akun (sheet Naming) / gabungan semua akun (sheet Fix)
+  // [naming-produk 19 Nov] naming sama tapi produk beda = baris terpisah (dulu digabung + 1 produk mayoritas → purchase Eye Cream masuk Tone Up)
   const g = new Map();
   ads.forEach(a => {
-    const label = namingOfEnt(a), k = (perAcc ? a.acc.id + "|" : "") + label.toLowerCase().replace(/[\s_.]+/g, "");
-    if (!g.has(k)) g.set(k, { label, acc: a.acc, list: [] }); g.get(k).list.push(a);
+    const label = namingOfEnt(a), prod = prodOfAd(a), k = (perAcc ? a.acc.id + "|" : "") + label.toLowerCase().replace(/[\s_.]+/g, "") + "|" + prod;
+    if (!g.has(k)) g.set(k, { label, prod, acc: a.acc, list: [] }); g.get(k).list.push(a);
   });
   return [...g.values()];
 }
@@ -1420,12 +1438,10 @@ function namingFix(ents, brand) {
   // sheet "Fix": TANPA akun — naming yang sama dari semua akun dijumlah jadi 1 baris, dikelompokkan per produk
   // [21 Okt] per brand (Fix Prepare / Fix Skinlyfe): naming yang sama di akun Prepare & Skinlyfe tidak lagi digabung (produk beda)
   const ads = winAds(ents).filter(a => !brand || String(a.acc.brand).toLowerCase() === String(brand).toLowerCase());
-  const tops = productTops(namingGroups(ads, true));
   const pOrder = p => { const i = PRODUCTS.findIndex(x => x.label === p); return i < 0 ? 999 : i; };
   const groups = namingGroups(ads, false).map(x => {
-    const prod = productOfNaming(x.list, x.label, tops);
     const run = x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0);
-    return { ...x, prod, m: sumM(x.list.map(a => AM.get(a.id))), run,
+    return { ...x, m: sumM(x.list.map(a => AM.get(a.id))), run,
       camps: [...new Set(run.map(a => a.camp))], accs: [...new Set(x.list.map(a => a.acc.id))] };
   }).filter(x => x.m.purch > 0)
     .sort((a, b) => pOrder(a.prod) - pOrder(b.prod) || winScore(b.m) - winScore(a.m));
@@ -1444,8 +1460,8 @@ function namingFix(ents, brand) {
 function namingSummary(ents) {
   // dihitung SELALU dari level iklan (nama konten) — export dari Campaigns, Ad sets, atau Ads menghasilkan sheet Naming yang SAMA
   const ads = winAds(ents);
-  const all = namingGroups(ads, true), tops = productTops(all);
-  const groups = all.map(x => ({ ...x, prod: productOfNaming(x.list, x.label, tops), m: sumM(x.list.map(a => AM.get(a.id))),
+  const all = namingGroups(ads, true);
+  const groups = all.map(x => ({ ...x, m: sumM(x.list.map(a => AM.get(a.id))),
       run: x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0),
       camps: [...new Set(x.list.filter(a => (AM.get(a.id)?.spend || 0) > 0).map(a => a.camp))], accs: [...new Set(x.list.map(a => a.acc.name))] }))
     .filter(x => x.m.purch > 0)   // naming tanpa purchase = tidak winning → tidak masuk
@@ -1475,10 +1491,10 @@ function exportData() {
     return { title: `Cek data · ${rangeText()}`, head: ["Akun", "ID", "Spend level akun", "Spend campaign Active+Paused", "Spend per iklan", "Purchases", "Conversion value"], kinds: ["txt", "txt", "rp", "rp", "rp", "int", "rp"], rows };
   }
   if (S.view === "content") {
-    const g = {}; ADS.filter(a => scopeOk(a) && qOk(a)).forEach(a => (g[a.ck] ||= { name: a.name, ads: [] }).ads.push(a));
+    const g = {}; ADS.filter(a => scopeOk(a) && qOk(a)).forEach(a => (g[a.ck + "|" + prodOfAd(a)] ||= { name: a.name, prod: prodOfAd(a), ads: [] }).ads.push(a));   // [naming-produk] konten + produk
     const list = Object.values(g).map(x => ({ ...x, m: sumM(x.ads.map(a => AM.get(a.id))) })).filter(x => x.m.spend > 0).sort((a, b) => winScore(b.m) - winScore(a.m));
-    return { title: `Winning content · ${rangeText()}`, head: ["Konten", "Jumlah akun", "Jumlah iklan", ...mh], kinds: ["txt", "int", "int", ...mk],
-      rows: list.map(x => [x.name, new Set(x.ads.map(a => a.acc.id)).size, x.ads.length, ...mv(x.m)]), total: ["TOTAL", "", list.reduce((t, x) => t + x.ads.length, 0), ...mv(sumM(list.map(x => x.m)))] };
+    return { title: `Winning content · ${rangeText()}`, head: ["Konten", "Produk", "Jumlah akun", "Jumlah iklan", ...mh], kinds: ["txt", "txt", "int", "int", ...mk],
+      rows: list.map(x => [x.name, x.prod, new Set(x.ads.map(a => a.acc.id)).size, x.ads.length, ...mv(x.m)]), total: ["TOTAL", "", "", list.reduce((t, x) => t + x.ads.length, 0), ...mv(sumM(list.map(x => x.m)))] };
   }
   const mOf = e => M.get(e.id);
   const ents = visibleRows().slice().sort((a, b) => {   // dikelompokkan: Naikkan budget → Potensi → Optimasi → Pantau → Matikan, di dalamnya yang paling winning dulu
@@ -1490,7 +1506,7 @@ function exportData() {
   const summary = namingSummary(ents);
   const fixes = [...new Set(winAds(ents).map(a => a.acc.brand))].sort().map(b => ({ brand: b, d: namingFix(ents, b) }));   // [21 Okt] Fix per brand
   const fix = { produkInvalid: fixes.reduce((t, x) => t + (x.d.produkInvalid || 0), 0) };
-  if (summary.produkInvalid || fix.produkInvalid)   // seharusnya selalu 0 (lihat productOfNaming); kalau tidak, jangan diam-diam
+  if (summary.produkInvalid || fix.produkInvalid)   // seharusnya selalu 0 (produk per iklan, kosong = "Belum diketahui"); kalau tidak, jangan diam-diam
     alert(`Peringatan: kolom Produk tidak valid (kosong/gabungan) — sheet Naming ${summary.produkInvalid}, sheet Fix ${fix.produkInvalid}. Tambahkan kata kunci produk di config.php → 'products'.`);
   return {
     title: `${viewName} · ${LVL[S.level][2]}s · ${rangeText()}`,
@@ -1612,24 +1628,30 @@ function openExportPicker() {
   const draw = () => {
     box.innerHTML = `<div class="xp" role="dialog" aria-label="Download Excel">
       <div class="xp-h"><b>Download Excel</b><button class="xp-x" data-xp="close" aria-label="Tutup">✕</button></div>
-      <p class="xp-sub">${esc(rangeText())} · ${esc(LVL[S.level][2])}s${S.f.prod !== "all" ? ` · Produk: <b>${esc(S.f.prod === "none" ? "Tidak terdeteksi" : S.f.prod)}</b>` : ""}${filterCount() ? ` · ${filterCount()} filter aktif` : ""}</p>
+      <p class="xp-sub">${esc(rangeText())} · ${esc(LVL[S.level][2])}s${S.f.prod !== "all" ? ` · Produk: <b>${esc(S.f.prod === "none" ? PROD_BELUM : S.f.prod)}</b>` : ""}${filterCount() ? ` · ${filterCount()} filter aktif` : ""}</p>
       <div class="xp-q"><button class="btn sm-btn" data-xp="all">Pilih semua</button><button class="btn sm-btn" data-xp="none">Kosongkan</button></div>
       <div class="xp-list">${Object.entries(groups).map(([g, list]) => `<div class="xp-g"><label class="xp-gh"><input type="checkbox" data-xpg="${esc(g)}" ${list.every(a => sel.has(a.id)) ? "checked" : ""}> ${esc(g)}</label>
         ${list.map(a => `<label class="xp-i ${a.err || !a.loaded ? "dis" : ""}"><input type="checkbox" data-xpa="${a.id}" ${sel.has(a.id) ? "checked" : ""} ${a.err || !a.loaded ? "disabled" : ""}> ${esc(a.name)}</label>`).join("")}</div>`).join("")}</div>
-      <div class="xp-f"><span>${sel.size} akun → <b>2 sheet</b> (Data + Naming, bisa difilter per akun & produk)</span><button class="btn primary" data-xp="go" ${sel.size ? "" : "disabled"}>⤓ Download</button></div></div>`;
+      <div class="xp-f"><span><b class="xp-n">${sel.size}</b> akun → <b>2 sheet</b> (Data + Naming, bisa difilter per akun & produk)</span><button class="btn primary" data-xp="go" ${sel.size ? "" : "disabled"}>⤓ Download</button></div></div>`;
   };
   box.addEventListener("click", e => {
     const t = e.target;
     if (t === box || t.closest('[data-xp="close"]')) { box.remove(); return; }
-    if (t.closest('[data-xp="all"]')) { ACCOUNTS.filter(a => !a.err && a.loaded).forEach(a => sel.add(a.id)); draw(); return; }
-    if (t.closest('[data-xp="none"]')) { sel.clear(); draw(); return; }
+    if (t.closest('[data-xp="all"]')) { ACCOUNTS.filter(a => !a.err && a.loaded).forEach(a => sel.add(a.id)); upd(); return; }
+    if (t.closest('[data-xp="none"]')) { sel.clear(); upd(); return; }
     const go = t.closest('[data-xp="go"]'); if (go) { box.remove(); doExport([...sel], $("#btnExport"), "xlsx"); return; }
   });
   box.addEventListener("change", e => {
     const t = e.target;
-    if (t.dataset.xpa) { t.checked ? sel.add(t.dataset.xpa) : sel.delete(t.dataset.xpa); draw(); }
-    if (t.dataset.xpg) { ACCOUNTS.filter(a => `${a.brand} · ${a.pf}` === t.dataset.xpg && !a.err && a.loaded).forEach(a => t.checked ? sel.add(a.id) : sel.delete(a.id)); draw(); }
+    if (t.dataset.xpa) { t.checked ? sel.add(t.dataset.xpa) : sel.delete(t.dataset.xpa); upd(); }
+    if (t.dataset.xpg) { ACCOUNTS.filter(a => `${a.brand} · ${a.pf}` === t.dataset.xpg && !a.err && a.loaded).forEach(a => t.checked ? sel.add(a.id) : sel.delete(a.id)); upd(); }
   });
+  // [centang 19 Nov] centang di dialog: hanya checkbox, centang grup & jumlah yang berubah (dialog tidak digambar ulang → daftar tidak lompat)
+  function upd() {
+    box.querySelectorAll("[data-xpa]").forEach(c => { c.checked = sel.has(c.dataset.xpa); });
+    box.querySelectorAll("[data-xpg]").forEach(c => { c.checked = ACCOUNTS.filter(a => `${a.brand} · ${a.pf}` === c.dataset.xpg).every(a => sel.has(a.id)); });
+    box.querySelector(".xp-n").textContent = sel.size; box.querySelector('[data-xp="go"]').disabled = !sel.size;
+  }
   draw(); document.body.appendChild(box);
 }
 async function doExport(target, btn, mode) {   // mode: "xlsx" (default) atau "gsheet"

@@ -95,16 +95,17 @@ function kr_tentukan(array $ad, array $daftar, array $manual): array {
     return ['nama' => KR_BELUM, 'kode' => null, 'sumber' => 'belum', 'oleh' => null, 'waktu' => null];
 }
 
-/** Iklan dengan spend > 0 di periode, sudah dijumlah per ad_id + kreator + kategori. $merek: '' | prepare | skinlyfe */
+/** Iklan dengan spend > 0 di periode, sudah dijumlah per ad_id + kreator + kategori + produk. $merek: '' | prepare | skinlyfe */
 function kr_iklan(PDO $db, string $dari, string $sampai, string $merek = ''): array {
+    require_once __DIR__ . '/produk_lib.php';
     $daftar = kr_daftar($db); $manual = kr_manual($db);
-    $sql = "SELECT x.ad_id, MAX(x.ad_name) ad_name, MAX(x.campaign_id) campaign_id, MAX(x.campaign_name) campaign_name, MAX(x.adset_name) adset_name,
+    $sql = "SELECT x.ad_id, MAX(x.ad_name) ad_name, MAX(x.campaign_id) campaign_id, MAX(x.campaign_name) campaign_name, MAX(x.adset_name) adset_name, MAX(x.adset_id) adset_id,
                    MAX(k.merek) merek, MAX(k.nama) akun, MAX(x.act_id) act_id, SUM(x.spend) spend, SUM(x.value) omset, SUM(x.purch) purch, SUM(x.atc) atc
             FROM ins_ad x JOIN akun k ON k.act_id = CONCAT('act_', x.act_id)
             WHERE x.tanggal BETWEEN ? AND ?" . ($merek !== '' ? " AND k.merek = ?" : '') . "
             GROUP BY x.ad_id HAVING SUM(x.spend) > 0 OR SUM(x.value) > 0 OR SUM(x.purch) > 0";   // [validasi] iklan tanpa belanja di periode tapi dapat purchase (atribusi) ikut, total = Ads Manager
     $q = $db->prepare($sql); $q->execute($merek !== '' ? [$dari, $sampai, $merek] : [$dari, $sampai]);
-    $mulai = kr_mulai($db); $status = kr_status($db);
+    $mulai = kr_mulai($db); $status = kr_status($db); $kat = pl_set_katalog($db);
     $o = [];
     foreach ($q->fetchAll() as $r) {
         $sp = (float)$r['spend']; $om = (float)$r['omset']; $pu = (int)$r['purch'];
@@ -116,6 +117,7 @@ function kr_iklan(PDO $db, string $dari, string $sampai, string $merek = ''): ar
         $r['kreator'] = kr_tentukan($r, $daftar, $manual);
         $r['konten'] = kr_konten((string)$r['ad_name'], (string)$r['campaign_name']);
         $r['konten_kunci'] = kr_konten_kunci($r['konten']);
+        $r['produk'] = pl_produk((string)$r['campaign_name'], (string)$r['adset_name'], (string)$r['ad_name'], null, isset($kat[(string)$r['adset_id']]));   // [naming-produk 19 Nov] produk per iklan
         $o[] = $r;
     }
     usort($o, function ($a, $b) { return $b['spend'] <=> $a['spend']; });
@@ -126,8 +128,8 @@ function kr_iklan(PDO $db, string $dari, string $sampai, string $merek = ''): ar
 function kr_per_konten(array $iklan): array {
     $g = [];
     foreach ($iklan as $a) {
-        $k = $a['merek'] . '|' . $a['konten_kunci'] . '|' . $a['kreator']['nama'];
-        if (!isset($g[$k])) $g[$k] = ['ad_id' => $a['ad_id'], 'ad_name' => $a['konten'], 'konten' => $a['konten'], 'konten_kunci' => $a['konten_kunci'], 'campaign_id' => $a['campaign_id'],
+        $k = $a['merek'] . '|' . $a['konten_kunci'] . '|' . $a['produk'] . '|' . $a['kreator']['nama'];   // [naming-produk 19 Nov] produk beda = baris beda
+        if (!isset($g[$k])) $g[$k] = ['ad_id' => $a['ad_id'], 'ad_name' => $a['konten'], 'konten' => $a['konten'], 'konten_kunci' => $a['konten_kunci'], 'produk' => $a['produk'], 'campaign_id' => $a['campaign_id'],
             'campaign_name' => $a['campaign_name'], 'merek' => $a['merek'], 'akun' => $a['akun'], 'act_id' => $a['act_id'], 'kreator' => $a['kreator'], 'spend' => 0.0, 'omset' => 0.0, 'purch' => 0, 'atc' => 0,
             'mulai' => null, 'status' => null, 'iklan' => [], 'akun_set' => []];
         $x = &$g[$k];

@@ -172,6 +172,9 @@ $public = [
         <div class="avatar" title="Mufti Arifudin Taqy">MT</div>
       </div>
     </header>
+<?php /* [status-data 19 Nov, Mufti] semua peringatan data (akun Meta/ERP, saldo Shopee kurang, naming & produk, total akun ≠ Ads Manager, validasi harian)
+          TIDAK tampil di dashboard: ditangkap ke <template id="stExtra"> lalu dipindah ke panel tombol "Status Data · N" (kuning). Dashboard hanya banner kreator. */
+    ob_start(); ?>
 <?php
     /* peringatan brand iklan Meta di ERP: file status ditulis /root/meta_ads_sync.php (cron tiap 30 menit) */
     $bc = json_decode((string)@file_get_contents('/var/lib/montera-ads/meta-brand-cek.json'), true);
@@ -206,26 +209,92 @@ $public = [
     <div class="brand-warn" role="alert" style="background:#B91C1C;color:#fff;border-color:#991B1B"><b>Saldo iklan Shopee hampir habis — iklan bisa berhenti.</b> Isi saldo di Seller Center → Iklan Shopee:
       <ul><?php foreach ($saK as $p) echo "<li>$p</li>"; ?></ul></div>
 <?php endif; ?>
-<?php /* [isi-otomatis 18 Nov, Mufti] toko dengan isi saldo otomatis aktif: tidak alarm, cukup info kecil saldo */
-    $saI = []; if (is_array($sa) && time() - strtotime((string)$sa['waktu']) < 3 * 3600) foreach ($sa['toko'] ?? [] as $t) if (!empty($t['isi_otomatis']) && isset($t['saldo']))
-        $saI[] = htmlspecialchars((string)$t['nama']) . ' Rp' . number_format((float)$t['saldo'], 0, ',', '.');
-    if ($saI): ?>
-    <div style="font-size:12.5px;color:#64748b;margin:0 0 10px">Saldo iklan Shopee: <?= implode(' · ', $saI) ?> · isi otomatis aktif (dicek <?= htmlspecialchars(date('H:i', strtotime($sa['waktu']))) ?>)</div>
-<?php endif; ?>
+<?php $stExtra = ob_get_clean(); ?>
+<?php /* [saldo-live 19 Nov, Mufti] saldo iklan Shopee LIVE (saldo-shopee.php: API get_total_balance, cache maks. 2 menit, tanpa cron) + biaya iklan hari ini,
+          diambil saat dashboard dibuka / tombol ↻ / tombol sync. API gagal → angka terakhir + "gagal update, terakhir HH:MM" (abu). */
+    $otomatis = []; if (is_array($sa)) foreach ($sa['toko'] ?? [] as $sid => $t) if (isset($t['isi_otomatis'])) $otomatis[(string)$sid] = (bool)$t['isi_otomatis']; ?>
+    <div id="saldoShopee" data-otomatis="<?= htmlspecialchars(json_encode($otomatis)) ?>" style="font-size:12.5px;color:#64748b;margin:0 0 10px;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center">
+      <span>Saldo iklan Shopee:</span><span id="saldoIsi">memuat…</span>
+      <button id="saldoBtn" type="button" title="Ambil saldo terbaru dari Shopee" style="border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:0 8px;font-size:12px;line-height:20px;cursor:pointer;color:#475569">↻</button>
+    </div>
+    <script>
+    (function () {
+      const box = document.getElementById('saldoIsi'), btn = document.getElementById('saldoBtn');
+      const oto = JSON.parse(document.getElementById('saldoShopee').dataset.otomatis || '{}');
+      const rp = x => 'Rp' + Math.round(x).toLocaleString('id-ID');
+      const jam = (ts, detik) => { const d = new Date(ts * 1000), p = n => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()) + (detik ? ':' + p(d.getSeconds()) : ''); };
+      const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+      let jalan = false;
+      async function saldo(segar) {
+        if (jalan) return; jalan = true; btn.disabled = true; btn.textContent = '…';
+        try {
+          const r = await fetch('saldo-shopee.php' + (segar ? '?segar=1' : ''), {credentials: 'same-origin', cache: 'no-store'});
+          const d = await r.json();
+          if (!d.toko) throw new Error(d.pesan || 'tidak terbaca');
+          box.innerHTML = Object.entries(d.toko).map(([sid, t]) => {
+            if (t.saldo === undefined) return `<span style="color:#94a3b8">${esc(t.nama)}: gagal update (belum ada angka)</span>`;
+            const ket = t.ok ? `dicek ${jam(t.waktu, true)}` : `<span style="color:#94a3b8">gagal update, terakhir ${jam(t.waktu, false)}</span>`;
+            const biaya = t.biaya_hari_ini !== undefined ? ` · biaya iklan hari ini ${rp(t.biaya_hari_ini)}${t.biaya_lama ? ' <span style="color:#94a3b8">(terakhir ' + jam(t.biaya_waktu, false) + ')</span>' : ''}` : '';
+            return `<span title="${esc(t.galat || '')}"><b style="color:${t.ok ? '#0f172a' : '#94a3b8'}">${esc(t.nama)} ${rp(t.saldo)}</b>${biaya} · ${ket}${oto[sid] ? ' · isi otomatis aktif' : ''}</span>`;
+          }).join('<span style="color:#cbd5e1">|</span>');
+        } catch (e) {
+          if (!box.dataset.ada) box.innerHTML = '<span style="color:#94a3b8">gagal update saldo, coba ↻</span>';
+          else box.insertAdjacentHTML('beforeend', ' <span style="color:#94a3b8">(gagal update ' + jam(Date.now() / 1000, false) + ')</span>');
+        } finally { box.dataset.ada = '1'; jalan = false; btn.disabled = false; btn.textContent = '↻'; }
+      }
+      btn.addEventListener('click', () => saldo(true));
+      ['syncBtn', 'railSync'].forEach(id => { const b = document.getElementById(id); if (b) b.addEventListener('click', () => saldo(true)); });
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) saldo(false); });
+      setInterval(() => { if (!document.hidden) saldo(false); }, 120000);
+      saldo(false);
+    })();
+    </script>
 <?php /* [kreator 18 Nov, Adila] iklan aktif baru tanpa kode kreator → peringatan (detail & set manual di kreator.php); cache 10 menit */
     $krTk = null; $krF = __DIR__ . '/logs/kreator-tanpa-kode.json';
     if (is_file($krF) && time() - filemtime($krF) < 600) $krTk = json_decode((string)@file_get_contents($krF), true);
     if (!is_array($krTk)) { try { require_once __DIR__ . '/kreator_lib.php'; $krTk = array_slice(array_column(kr_tanpa_kode(kr_db()), 'ad_name'), 0, 200); @file_put_contents($krF, json_encode($krTk)); } catch (Throwable $e) { $krTk = []; } }
     if ($krTk): ?>
-    <div class="brand-warn" role="alert"><b>Iklan tanpa kode kreator: <?= count($krTk) ?> iklan aktif baru.</b> Benerin naming-nya (kode kreator di belakang nomor konten, mis. <b>Stitch 04R</b>) atau set kreator manual:
-      <a href="kreator.php#tanpa-kode" style="font-weight:700">buka Konten per Kreator</a>
+    <div class="brand-warn" role="alert"><b>Ada <?= count($krTk) ?> iklan baru yang belum punya kode kreator.</b> Tambahkan kode kreator di nama iklan (contoh: <b>Stitch 04R</b>), atau pilih kreatornya di
+      <a href="kreator.php#tanpa-kode" style="font-weight:700">Konten per Kreator</a>.
       <span style="display:block;font-size:12px;opacity:.8;margin-top:4px"><?= htmlspecialchars(implode(' · ', array_slice(array_unique($krTk), 0, 8))) ?><?= count(array_unique($krTk)) > 8 ? ' …' : '' ?></span></div>
 <?php endif; ?>
+<?php ob_start(); ?>
+<?php /* [naming-produk 19 Nov, Mufti] pengaman otomatis setelah tiap sync (sync-insights.php → produk_lib.php pl_simpan_cek → naming-cek.json):
+          kuning = naming dipakai 2+ produk / iklan produk "Belum diketahui" / nomor naming iklan ≠ campaign (60 hari terakhir; data tidak diubah otomatis)
+          merah  = total per akun level iklan (dasar export) ≠ level akun Ads Manager (bulan lalu s/d kemarin), dengan angka selisihnya */
+    $nc = json_decode((string)@file_get_contents('/var/lib/montera-status/naming-cek.json'), true);
+    if (is_array($nc)):
+        $ncRp = function ($x) { return 'Rp' . number_format((float)$x, 0, ',', '.'); }; $ncE = function ($x) { return htmlspecialchars((string)$x); };
+        $ncJam = htmlspecialchars(date('d/m H:i', strtotime((string)$nc['dibuat'])));
+        if (!empty($nc['n_campur']) || !empty($nc['n_belum']) || !empty($nc['n_nomor'])): ?>
+    <div class="brand-warn" role="alert"><b>Cek naming &amp; produk iklan (60 hari terakhir, dicek <?= $ncJam ?>):</b>
+      <?= (int)$nc['n_campur'] ?> naming dipakai di 2+ produk (sudah dipisah per produk di export, naming-nya sebaiknya dibedakan) ·
+      <?= (int)$nc['n_belum'] ?> iklan produk <b>Belum diketahui</b> (tidak ada kode produk di nama campaign/ad set/iklan) ·
+      <?= (int)$nc['n_nomor'] ?> iklan perlu dicek naming (nomor di nama iklan ≠ nomor di nama campaign)
+      <details style="margin-top:4px;font-size:12px"><summary style="cursor:pointer">rincian</summary>
+        <?php if ($nc['campur']): ?><div style="margin-top:4px"><b>Naming 2+ produk:</b><?php foreach (array_slice($nc['campur'], 0, 30) as $g) echo '<br>' . $ncE(ucfirst($g['merek']) . ' · ' . $g['naming']) . ' → ' . implode(' | ', array_map(function ($p, $x) use ($ncRp, $ncE) { return $ncE($p) . ' ' . $ncRp($x['sp']) . ' · ' . (int)$x['pu'] . ' purchase · ' . $ncE(implode(', ', array_unique(array_column($x['iklan'], 'akun')))); }, array_keys($g['produk']), $g['produk'])); ?></div><?php endif; ?>
+        <?php if ($nc['nomor']): ?><div style="margin-top:6px"><b>Perlu dicek naming (tidak diubah otomatis):</b><?php foreach (array_slice($nc['nomor'], 0, 30) as $x) echo '<br>' . $ncE($x['akun']) . ' · iklan "' . $ncE($x['iklan']) . '" di campaign "' . $ncE($x['campaign']) . '" · ' . $ncRp($x['sp']); ?></div><?php endif; ?>
+        <?php if ($nc['belum']): ?><div style="margin-top:6px"><b>Produk Belum diketahui (spend terbesar):</b><?php foreach (array_slice($nc['belum'], 0, 20) as $x) echo '<br>' . $ncE($x['akun']) . ' · ' . $ncE($x['iklan']) . ' · campaign "' . $ncE($x['campaign']) . '" · ' . $ncRp($x['sp']); ?><?= $nc['n_belum'] > 20 ? '<br>… +' . ($nc['n_belum'] - 20) . ' iklan' : '' ?></div><?php endif; ?>
+      </details></div>
+<?php   endif;
+        $ncK = ['cek' => [], 'atribusi' => [], 'berjalan' => []]; foreach ($nc['akun'] ?? [] as $x) $ncK[$x['kategori'] ?? 'cek'][] = $x;
+        $ncBaris = function ($x) use ($ncE, $ncRp) { return $ncE($x['akun'] . ' ' . date('d/m', strtotime($x['tanggal']))) . ': spend ' . ($x['sp'] > 0 ? '+' : '') . $ncRp($x['sp']) . ' · purchase ' . ($x['pu'] > 0 ? '+' : '') . (int)$x['pu'] . ' · value ' . ($x['om'] > 0 ? '+' : '') . $ncRp($x['om']) . ' (iklan ' . (int)$x['pu_i'] . ' / ' . $ncRp($x['om_i']) . ' vs akun ' . (int)$x['pu_a'] . ' / ' . $ncRp($x['om_a']) . ')'; };
+        if ($ncK['cek']): ?>
+    <div class="brand-warn" role="alert"><b>Total iklan ≠ total akun (Ads Manager): <?= count($ncK['cek']) ?> akun-hari perlu dicek</b> (<?= htmlspecialchars(date('d/m', strtotime($nc['akun_periode'][0])) . '–' . date('d/m', strtotime($nc['akun_periode'][1]))) ?>, dicek <?= $ncJam ?>)
+      <?php foreach (array_slice($ncK['cek'], 0, 12) as $x) echo '<br>' . $ncBaris($x); ?></div>
+<?php   endif;
+        if ($ncK['atribusi'] || $ncK['berjalan']): ?>
+    <div class="validasi-terakhir ok"><details><summary style="cursor:pointer"><?= $ncK['atribusi'] ? count($ncK['atribusi']) . ' akun-hari selisih atribusi Meta ±1 purchase, spend sama & total brand sama' : '' ?><?= $ncK['atribusi'] && $ncK['berjalan'] ? ' · ' : '' ?><?= $ncK['berjalan'] ? count($ncK['berjalan']) . ' akun-hari data kemarin masih berubah di Meta' : '' ?> ▸</summary>
+      <?php foreach (array_merge($ncK['atribusi'], $ncK['berjalan']) as $x) echo $ncBaris($x) . '<br>'; ?></details></div>
+<?php   endif;
+    endif; ?>
 <?php /* [validasi-harian] hasil validasi data iklan terakhir (cron 08:00, juga dikirim ke WA Mufti) */
     $vt = json_decode((string)@file_get_contents('/var/lib/montera-ads/validasi-terakhir.json'), true);
     if (is_array($vt)): ?>
     <div class="validasi-terakhir <?= $vt['ok'] ? 'ok' : 'beda' ?>">Validasi terakhir <?= htmlspecialchars(date('d/m H:i', strtotime($vt['waktu']))) ?><?= !empty($vt['uji']) ? ' (uji)' : '' ?>: <b><?= htmlspecialchars(preg_replace('/^\[UJI\] /', '', $vt['ringkas'])) ?></b> · rentang <?= htmlspecialchars($vt['rentang']) ?> · selisih <?= (int)$vt['selisih'] ?>, gagal baca <?= (int)$vt['gagal'] ?></div>
 <?php endif; ?>
+<?php $stExtra .= ob_get_clean(); ?>
+<template id="stExtra"><?= $stExtra ?></template>
 
     <!-- AKUN (nyamping) -->
     <section class="card acc-card">

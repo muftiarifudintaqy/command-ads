@@ -322,7 +322,7 @@ a.jml.nol{background:#f1f5f9!important;color:#cbd5e1;pointer-events:none}
     <?php foreach ($iklan as $a): $kr = $a['kreator']; ?>
       <tr data-k="<?= e($kr['nama']) ?>" data-c="<?= e($a['kategori']) ?>">
         <?php if ($per === 'konten'): ?>
-        <td><details><summary class="nama-iklan" style="cursor:pointer;display:list-item" title="<?= e($a['konten']) ?>"><?= e($a['konten']) ?> <span class="sumber">· <?= count($a['iklan']) ?> iklan</span></summary>
+        <td><details><summary class="nama-iklan" style="cursor:pointer;display:list-item" title="<?= e($a['konten']) ?>"><?= e($a['konten']) ?> <span class="sumber">· <?= e($a['produk']) ?> · <?= count($a['iklan']) ?> iklan</span></summary>
           <div class="sumber" style="white-space:normal;max-width:420px"><?php foreach (array_slice($a['iklan'], 0, 25) as $x): ?><?= e($x['ad_name']) ?> · <?= e($x['akun']) ?> · <?= rp($x['spend']) ?> <span style="color:#94a3b8">(ID <?= e($x['ad_id']) ?>)</span><br><?php endforeach; ?><?= count($a['iklan']) > 25 ? '… +' . (count($a['iklan']) - 25) . ' iklan' : '' ?></div></details></td>
         <?php else: ?>
         <td class="nama-iklan" title="<?= e($a['ad_name']) ?> (ID <?= e($a['ad_id']) ?>)"><?= e($a['ad_name']) ?></td>
