@@ -356,7 +356,9 @@ function tandaiGagal(acc, msg) {   // data lama (tersimpan / tarikan sebelumnya)
 const TOKEN_MSG = { invalid: "Token invalid (code 190) — ganti token di /etc/montera-ads-meta.json", no_access: "Token tidak punya akses ke akun ini — assign System User di Business Manager" };
 async function loadLocal() {   // akun yang SEMUA tanggalnya sudah tersimpan → langsung dari tabel lokal
   const done = new Set();
+  const tA = performance.now();
   const L = await api("local", { from: S.from, to: S.to });
+  UKUR.ambil = performance.now() - tA;   // [ukur-muat] ambil + parse data tersimpan
   ACCOUNTS.forEach(a => {
     const x = L.accounts?.[a.id]; if (!x) return;
     a.localStatus = x.status; a.localAt = parseDT(x.updated);
@@ -426,6 +428,7 @@ async function loadAll(withStructure) {   // withStructure=true (Shift+klik sync
   if (!withStructure) { try { setLoading("Memuat data tersimpan…"); local = await loadLocal(); } catch (e) { local = new Set(); } }
   const stale = a => withStructure || !a.raw || Date.now() - a.structAt > 30 * 60000;
   const rest = ACCOUNTS.filter(a => !local.has(a));   // tanggal belum tersimpan lengkap → ambil live dari Meta
+  failedLive = rest.length;   // [ukur-muat] jumlah akun yang diambil live
   try {
     const needS = rest.filter(stale);
     rest.filter(a => !stale(a) && !a.maps).forEach(buildStructure);
@@ -459,10 +462,22 @@ async function loadAll(withStructure) {   // withStructure=true (Shift+klik sync
       setLoading(`Mengulang akun… ${++done}/${failed.size} (${sec()} dtk)`);
     });
   }
-  rebuild();
+  const tP = performance.now(); rebuild(); UKUR.proses = performance.now() - tP;
   S.lastSync = new Date(); S.busy = false; S.fromCache = false; S.syncSec = sec();
-  setLoading(""); render(); saveCache(); jadwalUlang(); muatStatusAkun(); muatStatusTotal();
+  const tR = performance.now(); setLoading(""); render(); UKUR.render = performance.now() - tR;
+  kirimUkur(t0); saveCache(); jadwalUlang(); muatStatusAkun(); muatStatusTotal();
 }
+// [ukur-muat 19 Nov, Mufti] waktu muat per tahap dikirim ke server (ukur-muat.jsonl) untuk laporan sebelum → sesudah percepatan
+const UKUR = {}; let ukurPertama = true;
+function kirimUkur(t0) {
+  const ms = { total: Date.now() - t0, ambil: UKUR.ambil || 0, proses: UKUR.proses || 0, render: UKUR.render || 0, live: failedLive || 0 };
+  if (ukurPertama) { ms.halaman = Math.round(performance.now()); ukurPertama = false; }
+  Object.keys(ms).forEach(k => ms[k] = Math.round(ms[k]));
+  const n = { iklan: ADS.length, campaign: CAMPAIGNS.length, baris: document.querySelectorAll("#tbody tr").length, live_akun: failedLive || 0 };
+  api("ukur", { from: S.from, to: S.to, ver: "sebelum", hp: matchMedia("(max-width: 760px)").matches, ms, n }).catch(() => {});
+  UKUR.ambil = UKUR.proses = UKUR.render = 0; failedLive = 0;
+}
+let failedLive = 0;
 
 async function setStatusLive(e, on) {
   const j = await api("post", { acc: e.acc.id, id: e.id, status: on ? "ACTIVE" : "PAUSED" });

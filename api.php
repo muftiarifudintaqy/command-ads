@@ -93,6 +93,15 @@ if ($action === 'status_akun') {
 }
 
 /* ---------- [validasi-total 30 Okt] kotak "Status Data": hasil Validasi Harian Total (ERP & ads), rincian hanya untuk Iklan ---------- */
+/* [ukur-muat 19 Nov, Mufti] waktu muat dashboard dari browser per tahap (ms) → /var/lib/montera-ads/ukur-muat.jsonl (sebelum → sesudah percepatan) */
+if ($action === 'ukur') {
+    $ms = []; foreach ((array)($in['ms'] ?? []) as $k => $v) if (preg_match('/^[a-z_]{1,20}$/', (string)$k)) $ms[$k] = max(0, min(600000, (int)$v));
+    $n = []; foreach ((array)($in['n'] ?? []) as $k => $v) if (preg_match('/^[a-z_]{1,20}$/', (string)$k)) $n[$k] = max(0, (int)$v);
+    $x = ['waktu' => date('c'), 'user' => (string)($_SESSION['ac_user'] ?? ''), 'from' => ins_date((string)($in['from'] ?? '')) ? $in['from'] : '', 'to' => ins_date((string)($in['to'] ?? '')) ? $in['to'] : '',
+          'ver' => substr(preg_replace('/[^a-z0-9_-]/i', '', (string)($in['ver'] ?? '')), 0, 20), 'hp' => !empty($in['hp']), 'ms' => $ms, 'n' => $n];
+    @file_put_contents('/var/lib/montera-ads/ukur-muat.jsonl', json_encode($x, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND | LOCK_EX);
+    out(['ok' => true]);
+}
 if ($action === 'status_total') {
     $v = json_decode((string) @file_get_contents('/var/lib/montera-status/validasi-total.json'), true) ?: [];
     $b = [];
