@@ -82,10 +82,12 @@ function productOfText(t) {
 const PRODC = new Map();
 // [naming-produk 19 Nov, Mufti] PRODUK PER IKLAN: kode produk di nama CAMPAIGN → nama AD SET → nama IKLAN; tidak ketemu = "Belum diketahui".
 // TIDAK memakai produk mayoritas / spend terbesar / default akun / link (sama dengan produk_lib.php pl_produk di server).
-const PROD_BELUM = "Belum diketahui", PROD_KATALOG = "Katalog (multi produk)";
+const PROD_BELUM = "Belum diketahui", PROD_KATALOG = "Katalog (multi produk)", PROD_UMUM = "Umum (multi produk)";
+// [19 Nov, Mufti] jenis campaign (bukan produk): tanpa kode produk di ad set/iklan = "Umum (multi produk)" (= produk_lib.php PL_JENIS)
+const JENIS_CAMPAIGN = /(^|[^a-z0-9])(ofc|official|all|all app|lva|live ads|appweb|winning ads|int jawa|smt)([^a-z0-9]|$)/i;
 function productOf(ad) {   // produk 1 iklan ("" = belum diketahui); tanpa kode tapi adset promosi product set katalog = "Katalog (multi produk)"
   if (PRODC.has(ad.id)) return PRODC.get(ad.id);
-  const r = productOfText(ad.camp?.name) || productOfText(ad.adset?.name) || productOfText(ad.name) || (ad.adset?.ps ? PROD_KATALOG : "");
+  const r = productOfText(ad.camp?.name) || productOfText(ad.adset?.name) || productOfText(ad.name) || (JENIS_CAMPAIGN.test(ad.camp?.name || "") ? PROD_UMUM : "") || (ad.adset?.ps ? PROD_KATALOG : "");
   PRODC.set(ad.id, r); return r;
 }
 const prodOfAd = ad => productOf(ad) || PROD_BELUM;
@@ -914,7 +916,7 @@ function renderFilters() {
   const f = S.f, n = filterCount();
   $("#filters").innerHTML = `
     <label>Funnel <select data-f="funnel">${["all", ...FUNNELS.map(x => x.label), "Lainnya"].map(v => `<option value="${v}" ${f.funnel === v ? "selected" : ""}>${v === "all" ? "Semua" : v}</option>`).join("")}</select></label>
-    <label>Produk <select data-f="prod"><option value="all">Semua</option>${PRODUCTS.map(p => `<option value="${esc(p.label)}" ${f.prod === p.label ? "selected" : ""}>${esc(p.label)}</option>`).join("")}<option value="${PROD_KATALOG}" ${f.prod === PROD_KATALOG ? "selected" : ""}>${PROD_KATALOG}</option><option value="none" ${f.prod === "none" ? "selected" : ""}>${PROD_BELUM}</option></select></label>
+    <label>Produk <select data-f="prod"><option value="all">Semua</option>${PRODUCTS.map(p => `<option value="${esc(p.label)}" ${f.prod === p.label ? "selected" : ""}>${esc(p.label)}</option>`).join("")}<option value="${PROD_KATALOG}" ${f.prod === PROD_KATALOG ? "selected" : ""}>${PROD_KATALOG}</option><option value="${PROD_UMUM}" ${f.prod === PROD_UMUM ? "selected" : ""}>${PROD_UMUM}</option><option value="none" ${f.prod === "none" ? "selected" : ""}>${PROD_BELUM}</option></select></label>
     <label>Delivery <select data-f="deliv">${["all", "Active", "Off", "Rejected", "In review", "Error"].map(v => `<option value="${v}" ${f.deliv === v ? "selected" : ""}>${v === "all" ? "Semua" : v}</option>`).join("")}</select></label>
     <label>Rekomendasi <select data-f="verdict"><option value="all">Semua</option>${Object.keys(V).map(k => `<option value="${k}" ${f.verdict === k ? "selected" : ""}>${V[k].label}</option>`).join("")}</select></label>
     <label>Spend ≥ <input type="number" min="0" step="1000" data-f="spendMin" value="${f.spendMin}" placeholder="Rp"></label>

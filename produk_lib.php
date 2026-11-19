@@ -9,7 +9,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/kreator_lib.php';   // kr_db, kr_konten, kr_konten_kunci
 
 const PL_BELUM = 'Belum diketahui';
-const PL_KATALOG = 'Katalog (multi produk)';   // [19 Nov, Mufti] tanpa kode produk tapi adset promosi product set katalog: tidak dipaksa 1 produk
+const PL_KATALOG = 'Katalog (multi produk)';
+const PL_UMUM = 'Umum (multi produk)';   // [19 Nov, Mufti] campaign JENIS (bukan produk) tanpa kode produk di ad set/iklan
+// jenis campaign (= app.js JENIS_CAMPAIGN): OFC / OFFICIAL / IG OFFICIAL, ALL / ALL APP, BOFU LVA / LIVE ADS, BOFU APPWEB, WINNING ADS, BOFU IE INT JAWA/SMT
+const PL_JENIS = '/(^|[^a-z0-9])(ofc|official|all|all app|lva|live ads|appweb|winning ads|int jawa|smt)([^a-z0-9]|$)/i';
+// akun-hari yang selisihnya dari Meta sendiri (dicek langsung ke API: level akun ≠ jumlah level iklan, termasuk DELETED/ARCHIVED) → abu, selesai
+const PL_SELISIH_META = [['Prepare Selow ID 1129', '2026-10-17']];   // [19 Nov, Mufti] tanpa kode produk tapi adset promosi product set katalog: tidak dipaksa 1 produk
 const PL_CEK = '/var/lib/montera-status/naming-cek.json';
 
 /** daftar produk dari config.php (urutan = prioritas), kunci dinormalkan seperti app.js PRODUCTS */
@@ -34,6 +39,7 @@ function pl_teks(?string $t, array $P): string {
 function pl_produk(string $camp, string $adset, string $ad, ?array $P = null, bool $katalog = false): string {
     $P = $P ?? pl_daftar();
     foreach ([$camp, $adset, $ad] as $t) if (($p = pl_teks($t, $P)) !== '') return $p;
+    if (preg_match(PL_JENIS, $camp)) return PL_UMUM;
     return $katalog ? PL_KATALOG : PL_BELUM;
 }
 
@@ -86,7 +92,7 @@ function pl_cek(PDO $db, ?string $dari = null, ?string $sampai = null): array {
         if (($c = pl_nomor_beda((string)$r['ad_name'], (string)$r['campaign_name'])) !== null)
             $nomor[] = ['merek' => $r['merek'], 'akun' => $r['akun'], 'iklan' => $r['ad_name'], 'campaign' => $r['campaign_name'], 'naming_campaign' => $c, 'sp' => (float)$r['sp'], 'pu' => (int)$r['pu'], 'ad_id' => $r['ad_id']];
     }
-    $campur = array_values(array_filter($g, function ($x) { return count(array_diff(array_keys($x['produk']), [PL_BELUM, PL_KATALOG])) >= 2; }));
+    $campur = array_values(array_filter($g, function ($x) { return count(array_diff(array_keys($x['produk']), [PL_BELUM, PL_KATALOG, PL_UMUM])) >= 2; }));
     usort($campur, function ($a, $b) { return array_sum(array_column($b['produk'], 'sp')) <=> array_sum(array_column($a['produk'], 'sp')); });
     usort($belum, function ($a, $b) { return $b['sp'] <=> $a['sp']; });
     usort($nomor, function ($a, $b) { return $b['sp'] <=> $a['sp']; });
@@ -107,7 +113,8 @@ function pl_cek_akun(PDO $db, string $dari, string $sampai): array {
     $o = [];
     foreach ($v['beda'] as $t) {
         $sp = round($t['sp_i'] - $t['sp_a']); $b = $brand[$t['merek'] . '|' . $t['tanggal']];
-        if ($sp != 0) $kat = $t['tanggal'] >= $kemarin ? 'berjalan' : 'cek';
+        if (in_array([$t['nama'], $t['tanggal']], PL_SELISIH_META, true)) $kat = 'meta';
+        elseif ($sp != 0) $kat = $t['tanggal'] >= $kemarin ? 'berjalan' : 'cek';
         else $kat = ($b['pu'] == 0 && abs($b['om']) <= 1) ? 'atribusi' : 'cek';   // toleransi Rp1 pembulatan
         $o[] = ['akun' => $t['nama'], 'merek' => $t['merek'], 'tanggal' => $t['tanggal'], 'kategori' => $kat,
             'sp' => $sp, 'pu' => $t['pu_i'] - $t['pu_a'], 'om' => round($t['om_i'] - $t['om_a']),

@@ -277,15 +277,15 @@ $public = [
         <?php if ($nc['belum']): ?><div style="margin-top:6px"><b>Produk Belum diketahui (spend terbesar):</b><?php foreach (array_slice($nc['belum'], 0, 20) as $x) echo '<br>' . $ncE($x['akun']) . ' · ' . $ncE($x['iklan']) . ' · campaign "' . $ncE($x['campaign']) . '" · ' . $ncRp($x['sp']); ?><?= $nc['n_belum'] > 20 ? '<br>… +' . ($nc['n_belum'] - 20) . ' iklan' : '' ?></div><?php endif; ?>
       </details></div>
 <?php   endif;
-        $ncK = ['cek' => [], 'atribusi' => [], 'berjalan' => []]; foreach ($nc['akun'] ?? [] as $x) $ncK[$x['kategori'] ?? 'cek'][] = $x;
+        $ncK = ['cek' => [], 'atribusi' => [], 'berjalan' => [], 'meta' => []]; foreach ($nc['akun'] ?? [] as $x) $ncK[$x['kategori'] ?? 'cek'][] = $x;
         $ncBaris = function ($x) use ($ncE, $ncRp) { return $ncE($x['akun'] . ' ' . date('d/m', strtotime($x['tanggal']))) . ': spend ' . ($x['sp'] > 0 ? '+' : '') . $ncRp($x['sp']) . ' · purchase ' . ($x['pu'] > 0 ? '+' : '') . (int)$x['pu'] . ' · value ' . ($x['om'] > 0 ? '+' : '') . $ncRp($x['om']) . ' (iklan ' . (int)$x['pu_i'] . ' / ' . $ncRp($x['om_i']) . ' vs akun ' . (int)$x['pu_a'] . ' / ' . $ncRp($x['om_a']) . ')'; };
         if ($ncK['cek']): ?>
     <div class="brand-warn" role="alert"><b>Total iklan ≠ total akun (Ads Manager): <?= count($ncK['cek']) ?> akun-hari perlu dicek</b> (<?= htmlspecialchars(date('d/m', strtotime($nc['akun_periode'][0])) . '–' . date('d/m', strtotime($nc['akun_periode'][1]))) ?>, dicek <?= $ncJam ?>)
       <?php foreach (array_slice($ncK['cek'], 0, 12) as $x) echo '<br>' . $ncBaris($x); ?></div>
 <?php   endif;
-        if ($ncK['atribusi'] || $ncK['berjalan']): ?>
-    <div class="validasi-terakhir ok"><details><summary style="cursor:pointer"><?= $ncK['atribusi'] ? count($ncK['atribusi']) . ' akun-hari selisih atribusi Meta ±1 purchase, spend sama & total brand sama' : '' ?><?= $ncK['atribusi'] && $ncK['berjalan'] ? ' · ' : '' ?><?= $ncK['berjalan'] ? count($ncK['berjalan']) . ' akun-hari data kemarin masih berubah di Meta' : '' ?> ▸</summary>
-      <?php foreach (array_merge($ncK['atribusi'], $ncK['berjalan']) as $x) echo $ncBaris($x) . '<br>'; ?></details></div>
+        if ($ncK['atribusi'] || $ncK['berjalan'] || $ncK['meta']): ?>
+    <div class="validasi-terakhir ok"><details><summary style="cursor:pointer"><?= $ncK['atribusi'] ? count($ncK['atribusi']) . ' akun-hari selisih atribusi Meta ±1 purchase, spend sama & total brand sama' : '' ?><?= $ncK['atribusi'] && $ncK['berjalan'] ? ' · ' : '' ?><?= $ncK['berjalan'] ? count($ncK['berjalan']) . ' akun-hari data kemarin masih berubah di Meta' : '' ?><?= $ncK['meta'] ? ' · ' . count($ncK['meta']) . ' akun-hari selisih dari Meta (level akun ≠ level iklan di Meta sendiri)' : '' ?> ▸</summary>
+      <?php foreach (array_merge($ncK['atribusi'], $ncK['berjalan'], $ncK['meta']) as $x) echo $ncBaris($x) . ($x['kategori'] === 'meta' ? ' — selisih dari Meta' : '') . '<br>'; ?></details></div>
 <?php   endif;
     endif; ?>
 <?php /* [validasi-harian] hasil validasi data iklan terakhir (cron 08:00, juga dikirim ke WA Mufti) */
