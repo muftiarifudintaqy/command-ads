@@ -10,7 +10,8 @@ require_once __DIR__ . '/kreator_lib.php';   // kr_db, kr_konten, kr_konten_kunc
 
 const PL_BELUM = 'Belum diketahui';
 const PL_KATALOG = 'Katalog (multi produk)';
-const PL_UMUM = 'Umum (multi produk)';   // [19 Nov, Mufti] campaign JENIS (bukan produk) tanpa kode produk di ad set/iklan
+const PL_UMUM = 'Umum (multi produk)';
+const PL_KATALOG_SISA = 'Katalog (produk tidak dirinci Meta)';   // [19 Nov, Mufti] sisa iklan katalog yang tidak masuk breakdown produk Meta   // [19 Nov, Mufti] campaign JENIS (bukan produk) tanpa kode produk di ad set/iklan
 // jenis campaign (= app.js JENIS_CAMPAIGN): OFC / OFFICIAL / IG OFFICIAL, ALL / ALL APP, BOFU LVA / LIVE ADS, BOFU APPWEB, WINNING ADS, BOFU IE INT JAWA/SMT
 const PL_JENIS = '/(^|[^a-z0-9])(ofc|official|all|all app|lva|live ads|appweb|winning ads|int jawa|smt)([^a-z0-9]|$)/i';
 // akun-hari yang selisihnya dari Meta sendiri (dicek langsung ke API: level akun ≠ jumlah level iklan, termasuk DELETED/ARCHIVED) → abu, selesai
@@ -75,7 +76,7 @@ function pl_pecah(array $tot, array $pp, array $ikut = []): array {
     $porsi = (float)$tot['spend'] > 0 ? $sisa['spend'] / (float)$tot['spend'] : (count($pp) ? 0.0 : 1.0);
     foreach ($ikut as $k) $sisa[$k] = (float)($tot[$k] ?? 0) * $porsi;
     if (abs($sisa['spend']) >= 0.5 || abs($sisa['purch']) >= 0.5 || abs($sisa['omset']) >= 0.5) {
-        if (isset($o[PL_KATALOG])) foreach ($sisa as $k => $v) $o[PL_KATALOG][$k] += $v; else $o[PL_KATALOG] = $sisa;
+        if (isset($o[PL_KATALOG_SISA])) foreach ($sisa as $k => $v) $o[PL_KATALOG_SISA][$k] += $v; else $o[PL_KATALOG_SISA] = $sisa;
     }
     return $o;
 }
@@ -129,7 +130,7 @@ function pl_cek(PDO $db, ?string $dari = null, ?string $sampai = null): array {
         if (($c = pl_nomor_beda((string)$r['ad_name'], (string)$r['campaign_name'])) !== null)
             $nomor[] = ['merek' => $r['merek'], 'akun' => $r['akun'], 'iklan' => $r['ad_name'], 'campaign' => $r['campaign_name'], 'naming_campaign' => $c, 'sp' => (float)$r['sp'], 'pu' => (int)$r['pu'], 'ad_id' => $r['ad_id']];
     }
-    $campur = array_values(array_filter($g, function ($x) { return count(array_diff(array_keys($x['produk']), [PL_BELUM, PL_KATALOG, PL_UMUM])) >= 2; }));
+    $campur = array_values(array_filter($g, function ($x) { return count(array_diff(array_keys($x['produk']), [PL_BELUM, PL_KATALOG, PL_UMUM, PL_KATALOG_SISA])) >= 2; }));
     usort($campur, function ($a, $b) { return array_sum(array_column($b['produk'], 'sp')) <=> array_sum(array_column($a['produk'], 'sp')); });
     usort($belum, function ($a, $b) { return $b['sp'] <=> $a['sp']; });
     usort($nomor, function ($a, $b) { return $b['sp'] <=> $a['sp']; });
