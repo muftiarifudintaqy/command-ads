@@ -535,6 +535,14 @@ async function loadAll(withStructure) {   // withStructure=true (Shift+klik sync
   kirimUkur(t0); saveCache(); jadwalUlang(); muatStatusAkun(); muatStatusTotal();
   if (S.antre) { S.antre = false; S.memuatPeriode = true; document.body.classList.add("memuat"); render(); loadAll(false); }
 }
+// [galat 19 Nov, Mufti] error JavaScript di browser dicatat ke server (ukur-muat.jsonl, ver "galat") — sumber error yang sebenarnya, bukan tebakan
+let galatN = 0;
+function laporGalat(e, tempat) {
+  try { if (++galatN > 20) return; const t = (tempat ? tempat + ": " : "") + (e && (e.stack || e.message) || String(e));
+    api("ukur", { ver: "galat", from: S.from, to: S.to, galat: t.slice(0, 800), ms: {}, n: {} }).catch(() => {}); } catch (x) { }
+}
+window.addEventListener("error", ev => laporGalat(ev.error || ev.message, "error"));
+window.addEventListener("unhandledrejection", ev => laporGalat(ev.reason, "promise"));
 // [ukur-muat 19 Nov, Mufti] waktu muat per tahap dikirim ke server (ukur-muat.jsonl) untuk laporan sebelum → sesudah percepatan
 const UKUR = {}; let ukurPertama = true;
 function kirimUkur(t0) {
@@ -1256,7 +1264,7 @@ async function setRange(from, to, preset) {
   if (to > TODAY) to = TODAY;
   S.from = from; S.to = to; S.preset = preset;
   S.memuatPeriode = true; document.body.classList.add("memuat");   // [cepat] skeleton, bukan angka Rp0 periode lama
-  render();
+  try { render(); } catch (e) { laporGalat(e, "setRange render"); }   // [galat 19 Nov] render gagal → data tetap dimuat
   await loadAll(false);   // tarik insight untuk tanggal baru
   if (S.memuatPeriode && !S.busy && !S.antre) { S.memuatPeriode = false; document.body.classList.remove("memuat"); render(); }
 }
