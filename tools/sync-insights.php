@@ -254,7 +254,14 @@ function sync_account(array $C, array $acc, string $since, string $until, string
                 ];
                 foreach ($raw['ads'] as &$o) { if (isset($o['creative']['body'])) $o['creative']['body'] = mb_substr($o['creative']['body'], 0, 400); } unset($o);
                 unset($raw['info']['id']);
-                $db->prepare('INSERT INTO ins_struct (act_id, raw, diambil_at) VALUES (?,?,NOW()) ON DUPLICATE KEY UPDATE raw=VALUES(raw), diambil_at=NOW()')->execute([$id, json_encode($raw, JSON_UNESCAPED_UNICODE)]);
+                // [binlog 20 Nov, Mufti] tulis HANYA kalau struktur berubah (URL thumbnail Meta bertanda tangan berganti tiap tarikan, berlaku ±1,3 hari,
+                // tidak dihitung) atau simpanan > 6 jam (thumbnail disegarkan). Dulu ditulis tiap sync: ±38% binlog MySQL. diambil_at = versi struktur
+                // untuk cache IndexedDB browser, jadi tidak berubah = browser tidak mengunduh ulang struktur.
+                $json = json_encode($raw, JSON_UNESCAPED_UNICODE);
+                $tanpaThumb = fn($x) => preg_replace('/"thumbnail_url":"[^"]*"/', '"thumbnail_url":""', (string) $x);
+                $q = $db->prepare('SELECT raw, diambil_at FROM ins_struct WHERE act_id = ?'); $q->execute([$id]); $lama = $q->fetch();
+                if (!$lama || $tanpaThumb($lama['raw']) !== $tanpaThumb($json) || strtotime((string) $lama['diambil_at']) < time() - 6 * 3600)
+                    $db->prepare('INSERT INTO ins_struct (act_id, raw, diambil_at) VALUES (?,?,NOW()) ON DUPLICATE KEY UPDATE raw=VALUES(raw), diambil_at=NOW()')->execute([$id, $json]);
             } catch (MetaErr $e) { say("  $acc[name]: struktur gagal ({$e->getMessage()}), pakai struktur lama"); }
         }
 
