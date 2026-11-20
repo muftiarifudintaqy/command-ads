@@ -436,10 +436,12 @@ async function siapkanHarian(ents) {
 }
 const perluHarian = e => !!e?.acc?.ringkas && ((e.level === "ad" ? [e] : adsIn(e)).some(a => !a.hariPenuh) || (e.level === "campaign" && !e.hariPenuh));
 // [status-akun 29 Okt] kotak status di atas dari cek pagi 06:00 (Meta = tersimpan = sheet = ERP) + status token terkini
+let VALID_SD = null;   // [mode-ketat 20 Nov, Mufti] data iklan sudah dicocokkan ke Meta (selisih 0) s/d tanggal ini
 async function muatStatusAkun() {
   try {
     const j = await api("status_akun", {}); const el = $("#statusAkun"); if (!el || !j || j.error) return;
     const tgl = j.valid_sd ? new Date(j.valid_sd + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short" }) : "—";
+    VALID_SD = j.valid_sd || null; try { renderHeader(); } catch (x) { }
     const ok = j.ok === j.total;
     el.className = "status-akun " + (ok ? "ok" : "cek");
     el.textContent = `Valid s/d ${tgl} · ${j.ok}/${j.total} akun OK`;
@@ -879,6 +881,11 @@ function renderHeader() {
     : S.lastSync ? `${S.fromCache ? "Data tersimpan" : "Updated"} ${hhmm(S.lastSync)}${S.syncSec != null && !S.fromCache ? ` (${S.syncSec} dtk)` : ""}${S.busy ? " · memperbarui…" : S.to === TODAY ? ` · auto ${CFG.autoRefreshMinutes} mnt` : ""}` : "Menghubungkan…";
   $("#dpLabel").textContent = periodLabel();
   $("#periodRange").textContent = rangeText() + (S.to >= TODAY ? " · Hari ini (sementara, belum masuk laporan)" : "");   // [h1-sheet 22 Okt] laporan resmi = s/d kemarin
+  // [mode-ketat 20 Nov, Mufti] angka ⏳ belum valid (periode melewati tanggal yang sudah dicocokkan ke Meta) tampil abu-abu + alasan
+  const belumValid = !VALID_SD || S.to > VALID_SD;
+  document.body.classList.toggle("angka-belum", belumValid);
+  if (belumValid) $("#periodRange").textContent += VALID_SD ? ` · ⏳ belum valid: data setelah ${new Date(VALID_SD + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short" })} belum dicocokkan ke Meta (abu-abu)` : " · ⏳ belum valid: status validasi belum terbaca";
+  else $("#periodRange").textContent += " · ✅ valid (sudah dicocokkan ke Meta)";
   const kills = ADS.filter(a => isOn(a) && pfOk(a.acc) && AI.get(a.id)?.v === "kill").length;
   $("#railBadge").textContent = kills; $("#railBadge").hidden = !kills;
 }

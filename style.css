@@ -642,3 +642,7 @@ tr.skel td{padding:12px 8px}
 @keyframes skel{0%{background-position:200% 0}100%{background-position:-200% 0}}
 body.memuat .acc-m b,body.memuat .funnels b{color:transparent !important;background:#e5e7eb;border-radius:4px;animation:skel 1.2s infinite linear;background-image:linear-gradient(90deg,#eef0f3 25%,#e2e5ea 50%,#eef0f3 75%);background-size:200% 100%}
 tr.lanjut td{color:#64748b;font-size:12.5px}
+
+/* [mode-ketat 20 Nov, Mufti] periode belum valid (melewati tanggal yang sudah dicocokkan ke Meta): angka abu-abu, bukan angka final */
+body.angka-belum .acc b, body.angka-belum .acc .acc-m, body.angka-belum #qSummary b, body.angka-belum tfoot td { color: #94a3b8 !important; }
+body.angka-belum #periodRange { color: #64748b; }
