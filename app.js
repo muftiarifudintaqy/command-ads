@@ -1677,7 +1677,11 @@ function buildSheet(XLSX, d, title) {
       total: d.total ? [...d.total, 0, 0, 0, 0] : d.total };
   }
   const kinds = d.kinds || d.head.map(() => "txt"), n = d.head.length;
-  const aoa = [[title], [d.title || ""], d.head, ...d.rows, ...(d.total ? [d.total] : [])];
+  // [mode-ketat laporan 20 Nov, Mufti] status ✅/⏳ ikut di baris ke-2 setiap sheet Excel (aturan sama dengan periodRange)
+  const stV = (!VALID_SD || S.to > VALID_SD)
+    ? ` · ⏳ BELUM VALID: ${VALID_SD ? "data setelah " + VALID_SD.split("-").reverse().join("/") + " belum dicocokkan ke Meta (selisih 0)" : "status validasi belum terbaca"}`
+    : ` · ✅ valid: sudah dicocokkan ke Meta (selisih 0) s/d ${VALID_SD.split("-").reverse().join("/")}`;
+  const aoa = [[title], [(d.title || "") + stV], d.head, ...d.rows, ...(d.total ? [d.total] : [])];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const enc = (r, c) => XLSX.utils.encode_cell({ r, c });
   const set = (r, c, s) => { const a = enc(r, c); if (!ws[a]) ws[a] = { t: "s", v: "" }; ws[a].s = s; if (s.numFmt && ws[a].t === "n") ws[a].z = s.numFmt; };

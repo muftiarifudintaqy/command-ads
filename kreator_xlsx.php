@@ -82,6 +82,10 @@ $info = [['Konten per Kreator', ''], ['Periode', date('d/m/Y', strtotime($dari))
 foreach ($v['brand'] as $t) $info[] = ['  ' . $t['nama'], $okTxt($t)];
 $info[] = ['  Total', $okTxt($v['total'])];
 foreach (array_slice($v['beda'], 0, 30) as $b) $info[] = ['  ' . $b['nama'] . ' ' . date('d/m', strtotime($b['tanggal'])), $sebab($b)];
+// [mode-ketat laporan 20 Nov, Mufti] ✅/⏳: aturan sama dengan dashboard (valid_sd dari cek akun pagi)
+$vsd_ = (json_decode((string) @file_get_contents('/var/lib/montera-ads/cek-akun-pagi.json'), true) ?: [])['valid_sd'] ?? null;
+$info[] = ['STATUS', (!$vsd_ || $sampai > $vsd_) ? '⏳ BELUM VALID: ' . ($vsd_ ? 'data setelah ' . date('d/m/Y', strtotime($vsd_)) . ' belum dicocokkan ke Meta (selisih 0)' : 'status validasi belum terbaca')
+    : '✅ valid: sudah dicocokkan ke Meta (selisih 0) s/d ' . date('d/m/Y', strtotime($vsd_))];
 $info[] = ['Dibuat', date('d/m/Y H:i') . ' WIB oleh ' . $user];
 $ws->fromArray($info, NULL, 'A1');
 $ws->getColumnDimension('A')->setWidth(38); $ws->getColumnDimension('B')->setWidth(120);
