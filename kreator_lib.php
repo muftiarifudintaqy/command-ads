@@ -30,8 +30,12 @@ function kr_db(): PDO {
 }
 
 /** Kode kreator dari nama iklan (huruf besar), NULL kalau polanya tidak ada. */
+/** [21 Nov, Mufti] akhiran = kode PRODUK (SKU satuan master ERP, mis. "AURA 03BC" = Body Cream, "junita 01TP" = Tone Up), bukan kode kreator */
+const KR_KODE_PRODUK = ['AO', 'BC', 'BM', 'CB', 'CM', 'DM', 'EC', 'FL', 'FS', 'GK', 'GS', 'HR', 'HT', 'IS', 'LF', 'LS', 'MS', 'NS', 'TP', 'UA'];
 function kr_kode(string $nama): ?string {
-    return preg_match(KR_POLA, trim($nama), $m) ? strtoupper($m[3]) : null;
+    if (!preg_match(KR_POLA, trim($nama), $m)) return null;
+    $k = strtoupper($m[3]);
+    return in_array($k, KR_KODE_PRODUK, true) ? null : $k;
 }
 
 /** ROAS; spend 0 tapi ada omset (purchase dari atribusi belanja sebelum periode) = tak hingga (≥ 8) */
