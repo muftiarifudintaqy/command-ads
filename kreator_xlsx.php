@@ -84,8 +84,11 @@ $info[] = ['  Total', $okTxt($v['total'])];
 foreach (array_slice($v['beda'], 0, 30) as $b) $info[] = ['  ' . $b['nama'] . ' ' . date('d/m', strtotime($b['tanggal'])), $sebab($b)];
 // [mode-ketat laporan 20 Nov, Mufti] ✅/⏳: aturan sama dengan dashboard (valid_sd dari cek akun pagi)
 $vsd_ = (json_decode((string) @file_get_contents('/var/lib/montera-ads/cek-akun-pagi.json'), true) ?: [])['valid_sd'] ?? null;
-$info[] = ['STATUS', (!$vsd_ || $sampai > $vsd_) ? '⏳ BELUM VALID: ' . ($vsd_ ? 'data setelah ' . date('d/m/Y', strtotime($vsd_)) . ' belum dicocokkan ke Meta (selisih 0)' : 'status validasi belum terbaca')
-    : '✅ valid: sudah dicocokkan ke Meta (selisih 0) s/d ' . date('d/m/Y', strtotime($vsd_))];
+// [21 Nov] ✅ hanya kalau (1) total iklan = total akun Meta untuk periode ini (kr_validasi, sama dengan baris Validasi di atas) DAN (2) cek akun pagi OK s/d akhir periode
+//          (dulu cuma (2) dan ditulis "selisih 0", padahal cek pagi memakai toleransi H-1 ≤ 0,1% → bisa ✅ walau baris Validasi ❌ beda)
+$info[] = ['STATUS', !$v['ok'] ? '⏳ BELUM VALID: total iklan ≠ total akun Meta di periode ini (lihat baris Validasi; selisih spend Rp' . number_format(abs($v['total']['sp_a'] - $v['total']['sp_i']), 0, ',', '.') . ', purchase ' . ($v['total']['pu_a'] - $v['total']['pu_i']) . ')'
+    : ((!$vsd_ || $sampai > $vsd_) ? '⏳ BELUM VALID: ' . ($vsd_ ? 'data setelah ' . date('d/m/Y', strtotime($vsd_)) . ' belum lolos cek akun Meta' : 'status validasi belum terbaca')
+    : '✅ valid: total iklan = total akun Meta, cek akun Meta OK s/d ' . date('d/m/Y', strtotime($vsd_)) . ' (H-1 toleransi ≤ 0,1%)')];
 $info[] = ['Dibuat', date('d/m/Y H:i') . ' WIB oleh ' . $user];
 $ws->fromArray($info, NULL, 'A1');
 $ws->getColumnDimension('A')->setWidth(38); $ws->getColumnDimension('B')->setWidth(120);

@@ -1679,8 +1679,8 @@ function buildSheet(XLSX, d, title) {
   const kinds = d.kinds || d.head.map(() => "txt"), n = d.head.length;
   // [mode-ketat laporan 20 Nov, Mufti] status ✅/⏳ ikut di baris ke-2 setiap sheet Excel (aturan sama dengan periodRange)
   const stV = (!VALID_SD || S.to > VALID_SD)
-    ? ` · ⏳ BELUM VALID: ${VALID_SD ? "data setelah " + VALID_SD.split("-").reverse().join("/") + " belum dicocokkan ke Meta (selisih 0)" : "status validasi belum terbaca"}`
-    : ` · ✅ valid: sudah dicocokkan ke Meta (selisih 0) s/d ${VALID_SD.split("-").reverse().join("/")}`;
+    ? ` · ⏳ BELUM VALID: ${VALID_SD ? "data setelah " + VALID_SD.split("-").reverse().join("/") + " belum lolos cek akun Meta" : "status validasi belum terbaca"}`
+    : ` · ✅ valid: cek akun Meta OK s/d ${VALID_SD.split("-").reverse().join("/")} (H-1 toleransi ≤ 0,1%)`;   // [21 Nov] dulu ditulis "selisih 0", padahal cek pagi bertoleransi
   const aoa = [[title], [(d.title || "") + stV], d.head, ...d.rows, ...(d.total ? [d.total] : [])];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const enc = (r, c) => XLSX.utils.encode_cell({ r, c });
